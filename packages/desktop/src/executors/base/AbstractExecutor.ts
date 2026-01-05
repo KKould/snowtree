@@ -1,0 +1,678 @@
+/**
+ * AbstractExecutor - Base class for CLI tool executors
+ * Inspired by vibe-kanban's StandardCodingAgentExecutor
+ */
+
+import { EventEmitter } from 'events';
+import { randomUUID } from 'crypto';
+import * as pty from '@homebridge/node-pty-prebuilt-multiarch';
+import * as path from 'path';
+import * as os from 'os';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+import type { Logger } from '../../infrastructure/logging/logger';
+import type { ConfigManager } from '../../infrastructure/config/configManager';
+import type { SessionManager } from '../../features/session/SessionManager';
+import { getShellPath } from '../../infrastructure/command/shellPath';
+import { findNodeExecutable } from '../../infrastructure/utils/nodeFinder';
+import { cliLogger } from '../../infrastructure/logging/cliLogger';
+import type { CliTool } from '../../infrastructure/logging/cliLogger';
+
+import type {
+  ExecutorTool,
+  ExecutorSpawnOptions,
+  ExecutorProcess,
+  ExecutorAvailability,
+  ExecutorOutputEvent,
+  ExecutorExitEvent,
+  ExecutorErrorEvent,
+  ExecutorSpawnedEvent,
+  ExecutorEvents,
+  NormalizedEntry,
+} from '../types';
+
+const execAsync = promisify(exec);
+
+interface AvailabilityCache {
+  result: ExecutorAvailability;
+  timestamp: number;
+}
+
+/**
+ * Abstract base class for CLI tool executors
+ * Provides common functionality for spawning and managing CLI processes
+ */
+export abstract class AbstractExecutor extends EventEmitter {
+  protected processes: Map<string, ExecutorProcess> = new Map();
+  protected availabilityCache: AvailabilityCache | null = null;
+  protected readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private cliOperationByPanel = new Map<string, { operationId: string; startMs: number }>();
+  private pendingToolOpByPanel = new Map<string, Array<{ operationId: string; startMs: number; kind: 'git.command' | 'cli.command' }>>();
+  private pendingToolOpByPanelId = new Map<string, Map<string, { startMs: number; kind: 'git.command' | 'cli.command' }>>();
+  protected runtimeMetaByPanel = new Map<string, { cliModel?: string; cliReasoningEffort?: string; cliSandbox?: string; cliAskForApproval?: string }>();
+
+  constructor(
+    protected sessionManager: SessionManager,
+    protected logger?: Logger,
+    protected configManager?: ConfigManager
+  ) {
+    super();
+    this.setMaxListeners(50);
+  }
+
+  // ============================================================================
+  // Abstract Methods - Must be implemented by subclasses
+  // ============================================================================
+
+  /** Get the executor tool type */
+  abstract getToolType(): ExecutorTool;
+
+  /** Get the CLI tool name for display */
+  abstract getToolName(): string;
+
+  /** Get the CLI command name (e.g., 'claude', 'codex') */
+  abstract getCommandName(): string;
+
+  /** Get custom executable path from config */
+  abstract getCustomExecutablePath(): string | undefined;
+
+  /** Test CLI availability */
+  abstract testAvailability(customPath?: string): Promise<ExecutorAvailability>;
+
+  /** Build command arguments */
+  abstract buildCommandArgs(options: ExecutorSpawnOptions): string[];
+
+  /** Initialize CLI environment (returns env vars) */
+  abstract initializeEnvironment(options: ExecutorSpawnOptions): Promise<Record<string, string>>;
+
+  /** Clean up resources when process ends */
+  abstract cleanupResources(sessionId: string): Promise<void>;
+
+  /** Parse CLI output and emit events */
+  abstract parseOutput(data: string, panelId: string, sessionId: string): void;
+
+  // ============================================================================
+  // Common Methods
+  // ============================================================================
+
+  /**
+   * Some executors run a long-lived background process (e.g. `codex app-server`).
+   * In those cases, the spawn command should be marked Done once the process is ready,
+   * rather than staying Running until the process exits.
+   */
+  protected shouldFinalizeSpawnCommandOnSpawn(): boolean {
+    return false;
+  }
+
+  /** Get CLI tool type for logging */
+  protected getCliLogType(): CliTool {
+    const type = this.getToolType();
+    if (type === 'claude') return 'Claude';
+    if (type === 'codex') return 'Codex';
+    return 'CLI';
+  }
+
+  /** Get executable path */
+  async getExecutablePath(): Promise<string> {
+    const customPath = this.getCustomExecutablePath();
+    if (customPath) {
+      this.logger?.info(`[${this.getCommandName()}] Using custom path: ${customPath}`);
+      return customPath;
+    }
+    return this.getCommandName();
+  }
+
+  /** Get cached availability */
+  async getCachedAvailability(): Promise<ExecutorAvailability> {
+    if (
+      this.availabilityCache &&
+      Date.now() - this.availabilityCache.timestamp < this.CACHE_TTL
+    ) {
+      return this.availabilityCache.result;
+    }
+
+    const result = await this.testAvailability();
+    this.availabilityCache = { result, timestamp: Date.now() };
+    return result;
+  }
+
+  /** Clear availability cache */
+  clearAvailabilityCache(): void {
+    this.availabilityCache = null;
+  }
+
+  /** Get enhanced system environment */
+  protected async getSystemEnvironment(): Promise<Record<string, string>> {
+    const shellPath = getShellPath();
+    const nodePath = await findNodeExecutable();
+    const nodeDir = path.dirname(nodePath);
+    const pathSeparator = process.platform === 'win32' ? ';' : ':';
+    const enhancedPath = nodeDir + pathSeparator + shellPath;
+
+    return {
+      ...process.env,
+      PATH: enhancedPath,
+    } as Record<string, string>;
+  }
+
+  /** Spawn a CLI process */
+  async spawn(options: ExecutorSpawnOptions): Promise<void> {
+    const { panelId, sessionId, worktreePath, prompt, isResume } = options;
+    const tool = this.getCliLogType();
+
+    try {
+      // Check availability
+      const availability = await this.getCachedAvailability();
+      if (!availability.available) {
+        await this.handleNotAvailable(availability, panelId, sessionId);
+        throw new Error(`${this.getToolName()} not available: ${availability.error}`);
+      }
+
+      // Build command
+      const args = this.buildCommandArgs(options);
+      const cliEnv = await this.initializeEnvironment(options);
+      const systemEnv = await this.getSystemEnvironment();
+      const env = { ...systemEnv, ...cliEnv };
+      const command = await this.getExecutablePath();
+
+      const operationId = randomUUID();
+      const startMs = Date.now();
+      this.cliOperationByPanel.set(panelId, { operationId, startMs });
+
+      // Log request
+      cliLogger.request({
+        tool,
+        panelId,
+        sessionId,
+        agentSessionId: options.agentSessionId,
+        worktreePath,
+        prompt: prompt || '',
+        model: options.model,
+        isResume: isResume || false,
+        command,
+        args,
+      });
+
+      const displayCommand = this.buildDisplayCommand(command, args);
+      const optionRecord = options as unknown as Record<string, unknown>;
+      const runtimeMeta = {
+        cliModel: typeof optionRecord.model === 'string' ? optionRecord.model : undefined,
+        cliSandbox: typeof optionRecord.sandbox === 'string' ? optionRecord.sandbox : undefined,
+        cliAskForApproval: typeof optionRecord.askForApproval === 'string' ? optionRecord.askForApproval : undefined,
+        cliReasoningEffort: typeof optionRecord.reasoningEffort === 'string' ? optionRecord.reasoningEffort : undefined,
+      };
+      this.runtimeMetaByPanel.set(panelId, runtimeMeta);
+      this.recordTimelineCommand({
+        sessionId,
+        panelId,
+        kind: 'cli.command',
+        status: 'started',
+        command: displayCommand,
+        cwd: worktreePath,
+        tool: this.getToolType(),
+        meta: {
+          operationId,
+          cliCommand: command,
+          cliArgs: args,
+          cliIsResume: Boolean(isResume),
+          ...runtimeMeta,
+        }
+      });
+
+      // Spawn PTY process
+      const ptyProcess = await this.spawnPtyProcess(command, args, worktreePath, env);
+
+      // Store process
+      const executorProcess: ExecutorProcess = {
+        pty: ptyProcess,
+        panelId,
+        sessionId,
+        worktreePath,
+      };
+      this.processes.set(panelId, executorProcess);
+
+      // Set up handlers
+      this.setupProcessHandlers(ptyProcess, panelId, sessionId);
+
+      // Build display command
+      const displayArgs = args.map((arg, i) => {
+        if (i > 0 && (args[i - 1] === '-p' || args[i - 1] === '--prompt')) {
+          const truncated = arg.length > 50 ? arg.substring(0, 50) + '...' : arg;
+          return `"${truncated}"`;
+        }
+        return arg.includes(' ') ? `"${arg}"` : arg;
+      });
+      const fullCommand = `${command} ${displayArgs.join(' ')}`;
+
+      // Emit spawned event
+      this.emit('spawned', { panelId, sessionId, fullCommand } as ExecutorSpawnedEvent);
+      cliLogger.info(tool, panelId, 'Process spawned successfully');
+
+      if (this.shouldFinalizeSpawnCommandOnSpawn()) {
+        const op = this.cliOperationByPanel.get(panelId);
+        if (op) {
+          const durationMs = Date.now() - op.startMs;
+          this.recordTimelineCommand({
+            sessionId,
+            panelId,
+            kind: 'cli.command',
+            status: 'finished',
+            command: undefined,
+            cwd: undefined,
+            tool: this.getToolType(),
+            durationMs,
+            meta: { operationId: op.operationId }
+          });
+          this.cliOperationByPanel.delete(panelId);
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      cliLogger.error(tool, panelId, 'Failed to spawn process', error instanceof Error ? error : undefined);
+
+      this.emit('error', { panelId, sessionId, error: errorMessage } as ExecutorErrorEvent);
+      throw error;
+    }
+  }
+
+  /** Spawn PTY process with fallback */
+  protected async spawnPtyProcess(
+    command: string,
+    args: string[],
+    cwd: string,
+    env: Record<string, string>
+  ): Promise<pty.IPty> {
+    if (!pty) {
+      throw new Error('node-pty not available');
+    }
+
+    this.logger?.verbose(`Executing: ${command} ${args.join(' ')}`);
+    this.logger?.verbose(`Working directory: ${cwd}`);
+
+    let ptyProcess: pty.IPty;
+    let attempt = 0;
+    let lastError: unknown;
+    const toolName = this.getToolName().toLowerCase();
+    const needsNodeFallbackKey = `${toolName}NeedsNodeFallback`;
+
+    while (attempt < 2) {
+      try {
+        // Add delay on Linux for multiple processes
+        if (os.platform() === 'linux' && this.processes.size > 0) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+
+        if (attempt === 0 && !(global as unknown as Record<string, boolean>)[needsNodeFallbackKey]) {
+          ptyProcess = pty.spawn(command, args, {
+            name: 'xterm-color',
+            cols: 80,
+            rows: 30,
+            cwd,
+            env,
+          });
+        } else {
+          // Node.js fallback
+          this.logger?.verbose(`Using Node.js fallback for ${this.getToolName()}`);
+          const nodePath = await findNodeExecutable();
+          const nodeArgs = ['--no-warnings', '--enable-source-maps', command, ...args];
+          ptyProcess = pty.spawn(nodePath, nodeArgs, {
+            name: 'xterm-color',
+            cols: 80,
+            rows: 30,
+            cwd,
+            env,
+          });
+        }
+
+        return ptyProcess;
+      } catch (error) {
+        lastError = error;
+        attempt++;
+
+        if (attempt === 1) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          if (
+            errorMsg.includes('No such file or directory') ||
+            errorMsg.includes('env: node:') ||
+            errorMsg.includes('ENOENT')
+          ) {
+            (global as unknown as Record<string, boolean>)[needsNodeFallbackKey] = true;
+            continue;
+          }
+        }
+        break;
+      }
+    }
+
+    throw lastError;
+  }
+
+  /** Set up process event handlers */
+  protected setupProcessHandlers(ptyProcess: pty.IPty, panelId: string, sessionId: string): void {
+    let buffer = '';
+
+    ptyProcess.onData((data: string) => {
+      buffer += data;
+
+      // Process complete lines
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.trim()) {
+          this.parseOutput(line, panelId, sessionId);
+        }
+      }
+    });
+
+    ptyProcess.onExit(async ({ exitCode, signal }) => {
+      // Process remaining buffer
+      if (buffer.trim()) {
+        this.parseOutput(buffer, panelId, sessionId);
+      }
+
+      this.processes.delete(panelId);
+      await this.cleanupResources(sessionId);
+
+      const op = this.cliOperationByPanel.get(panelId);
+      if (op) {
+        const durationMs = Date.now() - op.startMs;
+        const runtime = this.runtimeMetaByPanel.get(panelId) || {};
+        this.recordTimelineCommand({
+          sessionId,
+          panelId,
+          kind: 'cli.command',
+          status: typeof exitCode === 'number' && exitCode !== 0 ? 'failed' : 'finished',
+          command: undefined,
+          cwd: undefined,
+          tool: this.getToolType(),
+          durationMs,
+          exitCode: typeof exitCode === 'number' ? exitCode : undefined,
+          meta: { operationId: op.operationId, ...runtime }
+        });
+        this.cliOperationByPanel.delete(panelId);
+      }
+
+      this.emit('exit', { panelId, sessionId, exitCode, signal } as ExecutorExitEvent);
+      cliLogger.info(this.getCliLogType(), panelId, `Process exited with code ${exitCode}`);
+    });
+  }
+
+  protected handleNormalizedEntry(panelId: string, sessionId: string, entry: NormalizedEntry): void {
+    const entryMeta = {
+      ...(entry.metadata || {}),
+      panelId,
+      sessionId,
+      tool: this.getToolType(),
+    };
+    const enriched: NormalizedEntry = { ...entry, metadata: entryMeta };
+
+    this.emit('entry', enriched);
+
+    const meta = (enriched.metadata || {}) as Record<string, unknown>;
+    const modelFromMeta = typeof meta.model === 'string' ? meta.model : undefined;
+    const sandboxFromMeta = typeof meta.sandbox === 'string' ? meta.sandbox : undefined;
+    const approvalFromMeta = typeof meta.approval_policy === 'string' ? meta.approval_policy : undefined;
+    const reasoningFromMeta = typeof meta.reasoningEffort === 'string'
+      ? meta.reasoningEffort
+      : typeof meta.reasoning_effort === 'string'
+        ? meta.reasoning_effort
+        : undefined;
+
+    if (modelFromMeta || sandboxFromMeta || approvalFromMeta || reasoningFromMeta) {
+      const current = this.runtimeMetaByPanel.get(panelId) || {};
+      this.runtimeMetaByPanel.set(panelId, {
+        ...current,
+        cliModel: modelFromMeta || current.cliModel,
+        cliSandbox: sandboxFromMeta || current.cliSandbox,
+        cliAskForApproval: approvalFromMeta || current.cliAskForApproval,
+        cliReasoningEffort: reasoningFromMeta || current.cliReasoningEffort,
+      });
+    }
+
+    const action = enriched.actionType;
+    if (enriched.entryType === 'tool_use' && action?.type) {
+      const operationId = enriched.id || randomUUID();
+      const display = (enriched.content || '').trim();
+      if (!display) return;
+
+      const kind: 'git.command' | 'cli.command' =
+        action.type === 'command_run' && action.command && /^(git|gh)\b/.test(action.command.trim())
+          ? 'git.command'
+          : 'cli.command';
+
+      const startMs = Date.now();
+      const stack = this.pendingToolOpByPanel.get(panelId) || [];
+      stack.push({ operationId, startMs, kind });
+      this.pendingToolOpByPanel.set(panelId, stack);
+
+      const byId = this.pendingToolOpByPanelId.get(panelId) || new Map();
+      byId.set(operationId, { startMs, kind });
+      this.pendingToolOpByPanelId.set(panelId, byId);
+
+      const cwd = this.sessionManager.getSession(sessionId)?.worktreePath;
+      const runtime = this.runtimeMetaByPanel.get(panelId) || {};
+      this.recordTimelineCommand({
+        sessionId,
+        panelId,
+        kind,
+        status: 'started',
+        command: display,
+        cwd,
+        tool: this.getToolType(),
+        meta: {
+          operationId,
+          source: 'agent',
+          toolName: enriched.toolName,
+          agentActionType: action.type,
+          agentPath: 'path' in action ? (action as { path?: string }).path : undefined,
+          agentQuery: 'query' in action ? (action as { query?: string }).query : undefined,
+          agentUrl: 'url' in action ? (action as { url?: string }).url : undefined,
+          ...runtime,
+        }
+      });
+      return;
+    }
+
+    if (enriched.entryType === 'tool_result' && enriched.toolStatus && enriched.toolStatus !== 'pending') {
+      const byId = this.pendingToolOpByPanelId.get(panelId);
+      const opFromId = enriched.id && byId ? byId.get(enriched.id) : undefined;
+      if (enriched.id && byId) byId.delete(enriched.id);
+      if (byId && byId.size === 0) this.pendingToolOpByPanelId.delete(panelId);
+
+      let kind: 'git.command' | 'cli.command' | undefined = opFromId?.kind;
+      let startMs: number | undefined = opFromId?.startMs;
+      let operationId: string | undefined = enriched.id || undefined;
+
+      if (!kind || !startMs) {
+        const stack = this.pendingToolOpByPanel.get(panelId);
+        const last = stack?.pop();
+        if (stack && stack.length === 0) this.pendingToolOpByPanel.delete(panelId);
+        if (!last) return;
+        kind = last.kind;
+        startMs = last.startMs;
+        operationId = last.operationId;
+      }
+
+      if (!kind || !startMs) return;
+      const durationMs = Date.now() - startMs;
+      const cwd = this.sessionManager.getSession(sessionId)?.worktreePath;
+      const meta = (enriched.metadata || {}) as Record<string, unknown>;
+      const exitCode = typeof meta.exit_code === 'number'
+        ? (meta.exit_code as number)
+        : typeof meta.exitCode === 'number'
+          ? (meta.exitCode as number)
+          : undefined;
+      this.recordTimelineCommand({
+        sessionId,
+        panelId,
+        kind,
+        status: enriched.toolStatus === 'failed' ? 'failed' : 'finished',
+        command: undefined,
+        cwd,
+        tool: this.getToolType(),
+        durationMs,
+        exitCode,
+        meta: { operationId }
+      });
+    }
+  }
+
+  private recordTimelineCommand(args: {
+    sessionId: string;
+    panelId?: string;
+    kind: 'cli.command' | 'git.command';
+    status: 'started' | 'finished' | 'failed';
+    command?: string;
+    cwd?: string;
+    tool?: ExecutorTool;
+    durationMs?: number;
+    exitCode?: number;
+    meta?: Record<string, unknown>;
+  }): void {
+    try {
+      this.sessionManager.addTimelineEvent({
+        session_id: args.sessionId,
+        panel_id: args.panelId,
+        kind: args.kind,
+        status: args.status,
+        command: args.command,
+        cwd: args.cwd,
+        duration_ms: args.durationMs,
+        exit_code: args.exitCode,
+        tool: args.tool,
+        meta: args.meta,
+      });
+    } catch {
+      // Best-effort audit log; never break execution.
+    }
+  }
+
+  private buildDisplayCommand(command: string, args: string[]): string {
+    const displayArgs: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const current = args[i];
+      displayArgs.push(current.includes(' ') ? `"${current}"` : current);
+    }
+    return `${command} ${displayArgs.join(' ')}`.trim();
+  }
+
+  /** Handle CLI not available */
+  protected async handleNotAvailable(
+    availability: ExecutorAvailability,
+    panelId: string,
+    sessionId: string
+  ): Promise<void> {
+    this.logger?.error(`${this.getToolName()} not available: ${availability.error}`);
+
+    const message = [
+      `Error: ${availability.error}`,
+      '',
+      `${this.getToolName()} is not installed or not found in PATH.`,
+      '',
+      `Please install ${this.getToolName()}:`,
+      '1. Follow installation instructions for your platform',
+      `2. Verify: "${this.getCommandName()} --version"`,
+      '',
+      `PATH searched: ${getShellPath()}`,
+    ].join('\n');
+
+    this.emit('output', {
+      panelId,
+      sessionId,
+      type: 'json',
+      data: {
+        type: 'session',
+        data: {
+          status: 'error',
+          message: `${this.getToolName()} not available`,
+          details: message,
+        },
+      },
+      timestamp: new Date(),
+    } as ExecutorOutputEvent);
+
+    this.sessionManager.addSessionError(
+      sessionId,
+      `${this.getToolName()} not available`,
+      availability.error || 'Unknown error'
+    );
+  }
+
+  /** Send input to process */
+  sendInput(panelId: string, input: string): void {
+    const process = this.processes.get(panelId);
+    if (!process) {
+      throw new Error(`No process found for panel ${panelId}`);
+    }
+    process.pty.write(input);
+  }
+
+  /** Kill a process */
+  async kill(panelId: string): Promise<void> {
+    const process = this.processes.get(panelId);
+    if (!process) return;
+
+    const { sessionId } = process;
+    const pid = process.pty.pid;
+
+    await this.cleanupResources(sessionId);
+
+    if (pid) {
+      await this.killProcessTree(pid);
+    }
+
+    this.processes.delete(panelId);
+    this.emit('exit', { panelId, sessionId, exitCode: null, signal: 9 } as ExecutorExitEvent);
+  }
+
+  /** Kill process tree */
+  protected async killProcessTree(pid: number): Promise<boolean> {
+    try {
+      if (process.platform === 'win32') {
+        await execAsync(`taskkill /pid ${pid} /T /F`);
+      } else {
+        // Kill process group
+        try {
+          process.kill(-pid, 'SIGTERM');
+        } catch {
+          process.kill(pid, 'SIGTERM');
+        }
+
+        // Force kill after timeout
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        try {
+          process.kill(-pid, 'SIGKILL');
+        } catch {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            // Process already dead
+          }
+        }
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Check if process is running */
+  isRunning(panelId: string): boolean {
+    return this.processes.has(panelId);
+  }
+
+  /** Get running process count */
+  getProcessCount(): number {
+    return this.processes.size;
+  }
+
+  /** Cleanup all processes */
+  async cleanup(): Promise<void> {
+    const panelIds = Array.from(this.processes.keys());
+    await Promise.all(panelIds.map(id => this.kill(id)));
+  }
+}
+
+export default AbstractExecutor;

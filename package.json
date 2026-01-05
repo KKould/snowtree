@@ -1,0 +1,168 @@
+{
+  "name": "snowtree",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Snowtree - Multi-session AI CLI workspace manager with git worktrees",
+  "author": {
+    "name": "Snowtree"
+  },
+  "license": "Apache-2.0",
+  "main": "packages/desktop/dist/index.js",
+  "engines": {
+    "node": ">=22.14.0",
+    "pnpm": ">=8.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "better-sqlite3",
+      "@homebridge/node-pty-prebuilt-multiarch",
+      "esbuild",
+      "msgpackr-extract"
+    ]
+  },
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter @snowtree/desktop dev\" \"pnpm --filter @snowtree/ui dev\" \"wait-on http://localhost:4521 && node tools/scripts/run-electron-dev.mjs\"",
+    "build": "pnpm --filter @snowtree/core build && pnpm --filter @snowtree/desktop build && pnpm --filter @snowtree/ui build && pnpm run build:electron",
+    "build:desktop": "pnpm --filter @snowtree/desktop build",
+    "build:ui": "pnpm --filter @snowtree/ui build",
+    "build:electron": "electron-builder --publish never",
+    "preview": "pnpm --filter @snowtree/ui preview",
+    "lint": "pnpm --recursive lint",
+    "typecheck": "pnpm --recursive typecheck",
+    "postinstall": "electron-builder install-app-deps",
+    "electron:rebuild": "pnpm exec electron-rebuild -f -w better-sqlite3 -m ./packages/desktop",
+    "setup": "pnpm install && pnpm run electron:rebuild && pnpm run build:desktop",
+    "start": "pnpm run dev"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^2.0.0",
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.12.0",
+    "better-sqlite3": "^11.7.0",
+    "bull": "^4.16.3",
+    "electron-updater": "^6.6.2",
+    "web-streams-polyfill": "^3.3.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "@playwright/test": "^1.52.0",
+    "concurrently": "^9.1.0",
+    "electron": "^37.6.0",
+    "electron-builder": "^26.0.20",
+    "node-abi": "^4.14.0",
+    "playwright": "^1.52.0",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "wait-on": "^9.0.0"
+  },
+  "build": {
+    "appId": "com.snowtree.snowtree",
+    "productName": "snowtree",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "files": [
+      "packages/desktop/dist/**/*",
+      "packages/ui/dist/**/*",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/@anthropic-ai/claude-code/vendor/**/*.jar",
+      "LICENSE"
+    ],
+    "npmRebuild": true,
+    "buildDependenciesFromSource": false,
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/**/*.node",
+      "!node_modules/@anthropic-ai/claude-code/vendor/**",
+      "packages/desktop/dist/features/**/*.js"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "BohuTANG",
+        "repo": "snowtree"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "packages/desktop/assets/icon.icns",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "signIgnore": [
+        "node_modules/@anthropic-ai/claude-code/vendor/.*\\.jar$"
+      ],
+      "notarize": false,
+      "target": [
+        {
+          "target": "default",
+          "arch": "universal"
+        }
+      ],
+      "artifactName": "${productName}-${version}-macOS-universal.${ext}",
+      "x64ArchFiles": "Contents/Resources/app.asar.unpacked/node_modules/{**/*.node,**/*.dylib,@anthropic-ai/claude-code/vendor/**/*}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development",
+      "icon": "packages/desktop/assets/icon.png",
+      "desktop": {
+        "entry": {
+          "Name": "snowtree",
+          "Comment": "Multi-session AI CLI workspace manager with git worktrees",
+          "Categories": "Development;IDE;",
+          "StartupWMClass": "snowtree"
+        }
+      }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "packages/desktop/assets/icon.ico",
+      "artifactName": "${productName}-${version}-Windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "snowtree"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1"
+      ],
+      "artifactName": "${productName}-${version}-linux-${arch}.deb"
+    },
+    "appImage": {
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}"
+    }
+  },
+  "packageManager": "pnpm@10.11.1+sha512.e519b9f7639869dc8d5c3c5dfef73b3f091094b0a006d7317353c72b124e80e1afd429732e28705ad6bfa1ee879c1fce46c128ccebd3192101f43dd67c667912"
+}

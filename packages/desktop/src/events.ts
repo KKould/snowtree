@@ -1,0 +1,183 @@
+import type { BrowserWindow } from 'electron';
+import type { AppServices } from './infrastructure/ipc';
+import type { GitStatus } from '@snowtree/core/types/session';
+import type { NormalizedEntry } from './executors/types';
+
+type ExecutorLike = {
+  on: (event: string, listener: (...args: unknown[]) => void) => void;
+};
+
+export function setupEventListeners(services: AppServices, getMainWindow: () => BrowserWindow | null): void {
+  const { sessionManager, gitStatusManager, claudeExecutor, codexExecutor } = services;
+
+  const send = (channel: string, ...args: unknown[]) => {
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send(channel, ...args);
+  };
+
+  sessionManager.on('sessions-loaded', (sessions) => {
+    send('sessions:loaded', sessions);
+  });
+
+  sessionManager.on('session-created', (session) => {
+    send('session:created', session);
+  });
+
+  sessionManager.on('session-updated', (session) => {
+    send('session:updated', session);
+  });
+
+  sessionManager.on('session-deleted', (data) => {
+    send('session:deleted', data);
+  });
+
+  sessionManager.on('timeline:event', (data: { sessionId: string; event: unknown }) => {
+    send('timeline:event', data);
+  });
+
+  gitStatusManager.on('git-status-loading', (sessionId: string) => {
+    send('git-status-loading', { sessionId });
+  });
+
+  gitStatusManager.on('git-status-updated', (sessionId: string, gitStatus: GitStatus) => {
+    send('git-status-updated', { sessionId, gitStatus });
+  });
+
+  const wireExecutorLifecycle = (executor: ExecutorLike) => {
+    const streamingAssistantBufferByPanel = new Map<string, string>();
+    const lastAssistantByPanel = new Map<string, string>();
+    const pendingStreamFlushByPanel = new Map<string, NodeJS.Timeout>();
+
+    executor.on('spawned', (data: unknown) => {
+      const sessionId = typeof (data as { sessionId?: unknown })?.sessionId === 'string'
+        ? (data as { sessionId: string }).sessionId
+        : null;
+      if (!sessionId) return;
+      const session = sessionManager.getSession(sessionId);
+      if (!session) return;
+      // Only transition to running if the session was explicitly initializing.
+      // Spawning a long-lived background process (e.g. `codex app-server`) is not a "turn".
+      if (session.status === 'initializing') {
+        sessionManager.updateSessionStatus(sessionId, 'running');
+      }
+    });
+
+    executor.on('entry', (rawEntry: unknown) => {
+      const entry = rawEntry as NormalizedEntry;
+      const meta = (entry.metadata || {}) as Record<string, unknown>;
+      const panelId = typeof meta.panelId === 'string' ? meta.panelId : undefined;
+      const sessionId = typeof meta.sessionId === 'string' ? meta.sessionId : undefined;
+      if (!panelId || !sessionId) return;
+
+      if (entry.entryType === 'assistant_message') {
+        const content = typeof entry.content === 'string' ? entry.content : '';
+        if (!content.trim()) return;
+        const isStreaming = Boolean((meta as { streaming?: unknown }).streaming);
+
+        if (isStreaming) {
+          streamingAssistantBufferByPanel.set(panelId, content);
+          if (!pendingStreamFlushByPanel.has(panelId)) {
+            const t = setTimeout(() => {
+              pendingStreamFlushByPanel.delete(panelId);
+              const latest = streamingAssistantBufferByPanel.get(panelId);
+              if (!latest || !latest.trim()) return;
+              send('assistant:stream', { sessionId, panelId, content: latest });
+            }, 48);
+            pendingStreamFlushByPanel.set(panelId, t);
+          }
+          return;
+        }
+
+        const last = lastAssistantByPanel.get(panelId);
+        if (last === content) return;
+        lastAssistantByPanel.set(panelId, content);
+        streamingAssistantBufferByPanel.delete(panelId);
+        try {
+          sessionManager.addPanelConversationMessage(panelId, 'assistant', content);
+        } catch {
+          // best-effort; never break execution
+        }
+        return;
+      }
+
+      if (entry.entryType === 'error_message') {
+        const content = typeof entry.content === 'string' ? entry.content : 'Unknown error';
+        if (content.trim()) {
+          try {
+            sessionManager.addPanelConversationMessage(panelId, 'assistant', content);
+          } catch {
+            // best-effort
+          }
+        }
+        sessionManager.updateSessionStatus(sessionId, 'error');
+      }
+    });
+
+    executor.on('exit', (data: unknown) => {
+      const panelId = typeof (data as { panelId?: unknown })?.panelId === 'string'
+        ? (data as { panelId: string }).panelId
+        : null;
+      const sessionId = typeof (data as { sessionId?: unknown })?.sessionId === 'string'
+        ? (data as { sessionId: string }).sessionId
+        : null;
+      const exitCode = (data as { exitCode?: unknown })?.exitCode;
+      const signal = (data as { signal?: unknown })?.signal;
+      if (!sessionId) return;
+      const session = sessionManager.getSession(sessionId);
+      if (!session) return;
+      if (session.status === 'stopped') return;
+
+      if (panelId) {
+        const timer = pendingStreamFlushByPanel.get(panelId);
+        if (timer) clearTimeout(timer);
+        pendingStreamFlushByPanel.delete(panelId);
+
+        const buffered = streamingAssistantBufferByPanel.get(panelId);
+        if (buffered && buffered.trim()) {
+          const last = lastAssistantByPanel.get(panelId);
+          if (last !== buffered) {
+            lastAssistantByPanel.set(panelId, buffered);
+            try {
+              sessionManager.addPanelConversationMessage(panelId, 'assistant', buffered);
+            } catch {
+              // best-effort
+            }
+          }
+        }
+        streamingAssistantBufferByPanel.delete(panelId);
+      }
+
+      const code = typeof exitCode === 'number' ? exitCode : null;
+      const sig = typeof signal === 'number' ? signal : null;
+
+      if (code !== null && code !== 0) {
+        sessionManager.updateSessionStatus(sessionId, 'error', `Exited with code ${code}`);
+        return;
+      }
+
+      if (sig !== null) {
+        // If the process was terminated but the session wasn't explicitly stopped, keep it usable.
+        sessionManager.updateSessionStatus(sessionId, 'waiting');
+        return;
+      }
+
+      sessionManager.updateSessionStatus(sessionId, 'waiting');
+    });
+
+    executor.on('error', (data: unknown) => {
+      const sessionId = typeof (data as { sessionId?: unknown })?.sessionId === 'string'
+        ? (data as { sessionId: string }).sessionId
+        : null;
+      if (!sessionId) return;
+      const error = (data as { error?: unknown })?.error;
+      const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
+      const session = sessionManager.getSession(sessionId);
+      if (!session) return;
+      sessionManager.updateSessionStatus(sessionId, 'error', message);
+    });
+  };
+
+  wireExecutorLifecycle(claudeExecutor);
+  wireExecutorLifecycle(codexExecutor);
+}

@@ -1,0 +1,642 @@
+/**
+ * CodexExecutor - OpenAI Codex CLI executor
+ * Handles spawning and communicating with Codex CLI via JSON-RPC
+ */
+
+import { exec } from 'child_process';
+import { promisify } from 'util';
+
+import { AbstractExecutor } from '../base/AbstractExecutor';
+import type {
+  ExecutorTool,
+  ExecutorSpawnOptions,
+  ExecutorAvailability,
+  ExecutorOutputEvent,
+  JsonRpcRequest,
+  JsonRpcResponse,
+  JsonRpcNotification,
+} from '../types';
+import type { Logger } from '../../infrastructure/logging/logger';
+import type { ConfigManager } from '../../infrastructure/config/configManager';
+import type { SessionManager } from '../../features/session/SessionManager';
+import { findExecutableInPath } from '../../infrastructure/command/shellPath';
+import { CodexMessageParser } from './CodexMessageParser';
+import { cliLogger } from '../../infrastructure/logging/cliLogger';
+
+const execAsync = promisify(exec);
+
+interface CodexSpawnOptions extends ExecutorSpawnOptions {
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
+  askForApproval?: 'untrusted' | 'on-failure' | 'on-request' | 'never';
+  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
+}
+
+/**
+ * Codex CLI Executor using app-server mode with JSON-RPC
+ */
+export class CodexExecutor extends AbstractExecutor {
+  private messageParser: CodexMessageParser;
+  private requestId = 0;
+  private conversationIdByPanel = new Map<string, { conversationId: string; rolloutPath?: string }>();
+  private rpcOpById = new Map<string | number, { panelId: string; sessionId: string; startMs: number; kind: 'cli.command' }>();
+  private pendingUserTurnRpcIdsByPanel = new Map<string, string[]>();
+  private pendingRequests: Map<string | number, {
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+    label: string;
+  }> = new Map();
+
+  constructor(
+    sessionManager: SessionManager,
+    logger?: Logger,
+    configManager?: ConfigManager
+  ) {
+    super(sessionManager, logger, configManager);
+    this.messageParser = new CodexMessageParser();
+  }
+
+  // ============================================================================
+  // Abstract Method Implementations
+  // ============================================================================
+
+  getToolType(): ExecutorTool {
+    return 'codex';
+  }
+
+  getToolName(): string {
+    return 'Codex';
+  }
+
+  protected shouldFinalizeSpawnCommandOnSpawn(): boolean {
+    // `codex app-server` is a long-lived process; the “Running” indicator should
+    // reflect per-turn activity, not the server process lifetime.
+    return true;
+  }
+
+  getCommandName(): string {
+    return 'codex';
+  }
+
+  getCustomExecutablePath(): string | undefined {
+    return this.configManager?.getConfig()?.codexExecutablePath;
+  }
+
+  async testAvailability(customPath?: string): Promise<ExecutorAvailability> {
+    try {
+      const resolved = customPath || (await findExecutableInPath('codex')) || 'codex';
+      const command = resolved.includes(' ') ? `"${resolved}"` : resolved;
+      const { stdout } = await execAsync(`${command} --version`, {
+        timeout: 30000,
+        env: process.env,
+      });
+
+      const version = stdout.trim();
+      return {
+        available: true,
+        version,
+        path: resolved,
+      };
+    } catch (error) {
+      // Fallback to npx if no explicit custom path is set.
+      if (!customPath) {
+        try {
+          const { stdout } = await execAsync('npx -y @openai/codex@latest --version', {
+            timeout: 30000,
+            env: process.env,
+          });
+          const version = stdout.trim();
+          return {
+            available: true,
+            version,
+            path: 'npx -y @openai/codex@latest',
+          };
+        } catch {
+          // fall through
+        }
+      }
+
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        available: false,
+        error: errorMessage,
+      };
+    }
+  }
+
+  buildCommandArgs(options: ExecutorSpawnOptions): string[] {
+    void options;
+    // Codex uses app-server mode for JSON-RPC communication.
+    // NOTE: `codex app-server` does not accept `--sandbox` / `--ask-for-approval` flags.
+    // Those policies must be sent via JSON-RPC (e.g. `newConversation` overrides).
+    return ['app-server'];
+  }
+
+  async initializeEnvironment(options: ExecutorSpawnOptions): Promise<Record<string, string>> {
+    const { worktreePath } = options;
+    const env: Record<string, string> = {};
+
+    env.PWD = worktreePath;
+    env.NODE_NO_WARNINGS = '1';
+    env.NO_COLOR = '1';
+    env.RUST_LOG = 'error';
+
+    // Add OpenAI API key if configured
+    const apiKey = this.configManager?.getConfig()?.openaiApiKey;
+    if (apiKey) {
+      env.OPENAI_API_KEY = apiKey;
+    }
+
+    return env;
+  }
+
+  async cleanupResources(sessionId: string): Promise<void> {
+    // Clear pending requests
+    for (const [id, pending] of this.pendingRequests) {
+      pending.reject(new Error('Process terminated'));
+    }
+    this.pendingRequests.clear();
+    for (const [id, op] of this.rpcOpById) {
+      if (op.sessionId === sessionId) this.rpcOpById.delete(id);
+    }
+    for (const [panelId, proc] of this.processes) {
+      if (proc.sessionId === sessionId) {
+        const pending = this.pendingUserTurnRpcIdsByPanel.get(panelId);
+        if (pending?.length) {
+          for (const rpcId of pending) this.finishRpcTimeline(rpcId, 'failed');
+        }
+        this.pendingUserTurnRpcIdsByPanel.delete(panelId);
+        this.conversationIdByPanel.delete(panelId);
+      }
+    }
+    this.logger?.verbose(`Cleaned up Codex resources for session ${sessionId}`);
+  }
+
+  parseOutput(data: string, panelId: string, sessionId: string): void {
+    const trimmed = data.trim();
+    if (!trimmed) return;
+
+    try {
+      const message = JSON.parse(trimmed);
+
+      // Handle JSON-RPC response
+      if ('id' in message && (message.result !== undefined || message.error)) {
+        this.handleRpcResponse(message as JsonRpcResponse);
+        return;
+      }
+
+      // Handle JSON-RPC notification
+      if ('method' in message && !('id' in message)) {
+        this.handleRpcNotification(message as JsonRpcNotification, panelId, sessionId);
+        return;
+      }
+
+      // Handle JSON-RPC request (from server)
+      if ('method' in message && 'id' in message) {
+        // When running under a PTY, our outbound JSON-RPC requests are echoed back to stdout.
+        // Ignore these request-shaped echoes; responding to them corrupts the protocol.
+        const m = message as { id: string | number; method: string };
+        const normalizedId = this.normalizeRpcId(m.id);
+        const clientMethods = new Set([
+          'initialize',
+          'newConversation',
+          'resumeConversation',
+          'addConversationListener',
+          'sendUserMessage',
+        ]);
+        if (clientMethods.has(m.method)) return;
+        if (this.pendingRequests.has(m.id) || this.pendingRequests.has(normalizedId)) return;
+        this.handleRpcRequest(message as JsonRpcRequest, panelId, sessionId);
+        return;
+      }
+
+      // Generic message
+      this.emit('output', {
+        panelId,
+        sessionId,
+        type: 'json',
+        data: message,
+        timestamp: new Date(),
+      } as ExecutorOutputEvent);
+    } catch {
+      // Not JSON, emit as stdout
+      this.emit('output', {
+        panelId,
+        sessionId,
+        type: 'stdout',
+        data: trimmed,
+        timestamp: new Date(),
+      } as ExecutorOutputEvent);
+    }
+  }
+
+  // ============================================================================
+  // JSON-RPC Protocol Methods
+  // ============================================================================
+
+  private nextRequestId(): string {
+    return String(++this.requestId);
+  }
+
+  private normalizeRpcId(id: string | number): string {
+    return typeof id === 'string' ? id : String(id);
+  }
+
+  private handleRpcResponse(response: JsonRpcResponse): void {
+    const normalizedId = this.normalizeRpcId(response.id);
+    const pending = this.pendingRequests.get(response.id) || this.pendingRequests.get(normalizedId);
+    if (!pending) {
+      // In PTY mode, our own outbound responses (e.g. approvals) can be echoed back.
+      this.logger?.verbose(`Received response for unknown request: ${normalizedId}`);
+      return;
+    }
+
+    const op = this.rpcOpById.get(response.id) || this.rpcOpById.get(normalizedId);
+
+    this.pendingRequests.delete(response.id);
+    this.pendingRequests.delete(normalizedId);
+
+    if (!response.error && op && (pending.label === 'newConversation' || pending.label === 'resumeConversation')) {
+      const result = response.result as Record<string, unknown> | undefined;
+      const model = result && typeof result.model === 'string' ? result.model : undefined;
+      const reasoningEffort = result && typeof result.reasoning_effort === 'string'
+        ? result.reasoning_effort
+        : result && typeof result.reasoningEffort === 'string'
+          ? result.reasoningEffort
+          : undefined;
+      if (model || reasoningEffort) {
+        this.handleNormalizedEntry(op.panelId, op.sessionId, {
+          id: `codex:meta:${String(response.id)}`,
+          timestamp: new Date().toISOString(),
+          entryType: 'system_message',
+          content: '',
+          metadata: {
+            model,
+            reasoning_effort: reasoningEffort,
+          },
+        });
+      }
+    }
+
+    // For `sendUserMessage`, the RPC response is just an ack; keep it Running until the turn completes.
+    if (pending.label === 'sendUserMessage') {
+      if (response.error && op?.panelId) {
+        this.dropPendingUserTurn(op.panelId, normalizedId);
+        this.finishRpcTimeline(response.id, 'failed');
+        this.finishRpcTimeline(normalizedId, 'failed');
+      }
+    } else {
+      this.finishRpcTimeline(response.id, response.error ? 'failed' : 'finished');
+      this.finishRpcTimeline(normalizedId, response.error ? 'failed' : 'finished');
+    }
+
+    if (response.error) {
+      pending.reject(new Error(response.error.message));
+    } else {
+      pending.resolve(response.result);
+    }
+  }
+
+  private handleRpcNotification(
+    notification: JsonRpcNotification,
+    panelId: string,
+    sessionId: string
+  ): void {
+    const { method, params } = notification;
+
+    // Keep the per-prompt RPC entry Running until the turn completes.
+    if (method === 'turn/completed' || method === 'codex/event/task_complete') {
+      this.finishNextPendingUserTurn(panelId, 'finished');
+      if (!this.pendingUserTurnRpcIdsByPanel.get(panelId)?.length) {
+        this.sessionManager.updateSessionStatus(sessionId, 'waiting');
+      }
+    } else if (method === 'codex/event/turn_aborted') {
+      this.finishNextPendingUserTurn(panelId, 'failed');
+      if (!this.pendingUserTurnRpcIdsByPanel.get(panelId)?.length) {
+        this.sessionManager.updateSessionStatus(sessionId, 'error', 'Turn aborted');
+      }
+    } else if (method === 'error') {
+      const willRetry = typeof (params as { willRetry?: unknown; will_retry?: unknown })?.willRetry === 'boolean'
+        ? Boolean((params as { willRetry: boolean }).willRetry)
+        : typeof (params as { will_retry?: unknown })?.will_retry === 'boolean'
+          ? Boolean((params as { will_retry: boolean }).will_retry)
+          : false;
+      if (!willRetry) {
+        this.finishNextPendingUserTurn(panelId, 'failed');
+        if (!this.pendingUserTurnRpcIdsByPanel.get(panelId)?.length) {
+          const err = (params as { error?: unknown })?.error as { message?: unknown } | undefined;
+          const msg = err && typeof err.message === 'string' ? err.message : 'Codex error';
+          this.sessionManager.updateSessionStatus(sessionId, 'error', msg);
+        }
+      }
+    }
+
+    // Prefer v2 notifications. Ignore legacy `codex/event/*` to avoid duplicates.
+    const entry = this.messageParser.parseV2Notification(method, params, panelId);
+    if (entry) this.handleNormalizedEntry(panelId, sessionId, entry);
+
+    // Emit raw notification
+    this.emit('output', {
+      panelId,
+      sessionId,
+      type: 'json',
+      data: { type: 'notification', method, params },
+      timestamp: new Date(),
+    } as ExecutorOutputEvent);
+  }
+
+  private handleRpcRequest(
+    request: JsonRpcRequest,
+    panelId: string,
+    sessionId: string
+  ): void {
+    const { method, params, id } = request;
+
+    // Handle approval requests
+    if (method === 'applyPatchApproval' || method === 'execCommandApproval') {
+      // Auto-approve for now (can be enhanced with approval service)
+      this.sendRpcResponse(panelId, id, { decision: 'approved' });
+      return;
+    }
+
+    if (method === 'item/commandExecution/requestApproval' || method === 'item/fileChange/requestApproval') {
+      void params;
+      // Auto-accept (v2 approval decision)
+      this.sendRpcResponse(panelId, id, { decision: 'accept' });
+      return;
+    }
+
+    // Ignore unknown requests. In app-server mode, the server should not send arbitrary requests.
+    // (Request-shaped JSON is commonly PTY-echo of our own outbound messages.)
+    this.logger?.verbose(`Unhandled Codex request: ${method}`);
+  }
+
+  private sendRpcMessage(panelId: string, message: JsonRpcRequest | JsonRpcResponse | JsonRpcNotification): void {
+    const process = this.processes.get(panelId);
+    if (!process) {
+      throw new Error(`No Codex process found for panel ${panelId}`);
+    }
+
+    const data = JSON.stringify(message) + '\n';
+    process.pty.write(data);
+  }
+
+  private sendRpcResponse(panelId: string, id: string | number, result: unknown): void {
+    this.sendRpcMessage(panelId, {
+      id,
+      result,
+    });
+  }
+
+  private recordRpcTimelineStart(panelId: string, sessionId: string, id: string | number, method: string, params?: unknown): void {
+    const startMs = Date.now();
+    this.rpcOpById.set(id, { panelId, sessionId, startMs, kind: 'cli.command' });
+
+    // Record the raw JSON-RPC request we send to the Codex app-server (no synthetic `codex.rpc …` formatting).
+    // This keeps the audit log transparent and avoids us "processing" commands for display.
+    const display = JSON.stringify({ id, method, params });
+    const cwd = this.sessionManager.getSession(sessionId)?.worktreePath;
+    const runtime = this.runtimeMetaByPanel.get(panelId) || {};
+    this.sessionManager.addTimelineEvent({
+      session_id: sessionId,
+      panel_id: panelId,
+      kind: 'cli.command',
+      status: 'started',
+      command: display,
+      cwd,
+      tool: this.getToolType(),
+      meta: { operationId: `rpc:${String(id)}`, rpcMethod: method, ...runtime },
+    });
+  }
+
+  private finishRpcTimeline(id: string | number, status: 'finished' | 'failed'): void {
+    const op = this.rpcOpById.get(id);
+    if (!op) return;
+    this.rpcOpById.delete(id);
+    const durationMs = Date.now() - op.startMs;
+    this.sessionManager.addTimelineEvent({
+      session_id: op.sessionId,
+      panel_id: op.panelId,
+      kind: 'cli.command',
+      status,
+      duration_ms: durationMs,
+      tool: this.getToolType(),
+      meta: { operationId: `rpc:${String(id)}`, rpcId: String(id) },
+    });
+  }
+
+  // formatRpcDisplay removed: timeline shows raw JSON-RPC.
+
+  private async sendRpcRequest<T>(panelId: string, method: string, params?: unknown): Promise<T> {
+    const id = this.nextRequestId();
+    const request: JsonRpcRequest = {
+      id,
+      method,
+      params,
+    };
+
+    {
+      const proc = this.processes.get(panelId);
+      if (proc) this.recordRpcTimelineStart(panelId, proc.sessionId, id, method, params);
+    }
+
+    return new Promise((resolve, reject) => {
+      this.pendingRequests.set(id, { resolve: resolve as (value: unknown) => void, reject, label: method });
+      this.sendRpcMessage(panelId, request);
+
+      // Timeout after 30 seconds
+      setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          this.finishRpcTimeline(id, 'failed');
+          reject(new Error(`Request ${method} timed out`));
+        }
+      }, 30000);
+    });
+  }
+
+  private enqueuePendingUserTurn(panelId: string, rpcId: string): void {
+    const q = this.pendingUserTurnRpcIdsByPanel.get(panelId) || [];
+    q.push(rpcId);
+    this.pendingUserTurnRpcIdsByPanel.set(panelId, q);
+  }
+
+  private dropPendingUserTurn(panelId: string, rpcId: string): void {
+    const q = this.pendingUserTurnRpcIdsByPanel.get(panelId);
+    if (!q?.length) return;
+    const next = q.filter((id) => id !== rpcId);
+    if (next.length === 0) this.pendingUserTurnRpcIdsByPanel.delete(panelId);
+    else this.pendingUserTurnRpcIdsByPanel.set(panelId, next);
+  }
+
+  private finishNextPendingUserTurn(panelId: string, status: 'finished' | 'failed'): void {
+    const q = this.pendingUserTurnRpcIdsByPanel.get(panelId);
+    if (!q?.length) return;
+    const rpcId = q.shift();
+    if (!rpcId) return;
+    if (q.length === 0) this.pendingUserTurnRpcIdsByPanel.delete(panelId);
+    this.finishRpcTimeline(rpcId, status);
+  }
+
+  // ============================================================================
+  // Codex-specific Methods
+  // ============================================================================
+
+  /**
+   * Initialize Codex app-server connection
+   */
+  async initialize(panelId: string): Promise<void> {
+    await this.sendRpcRequest(panelId, 'initialize', {
+      clientInfo: {
+        name: 'snowtree',
+        title: 'snowtree',
+        version: '0.1.0',
+      }
+    });
+
+    // Send initialized notification
+    this.sendRpcMessage(panelId, {
+      method: 'initialized',
+    } as JsonRpcNotification);
+  }
+
+  /**
+   * Create a new Codex conversation
+   */
+  async newConversation(
+    panelId: string,
+    params: {
+      cwd?: string;
+      model?: string;
+      sandbox?: string;
+      approvalPolicy?: string;
+    }
+  ): Promise<{ conversationId: string; rolloutPath?: string }> {
+    return this.sendRpcRequest(panelId, 'newConversation', params);
+  }
+
+  /**
+   * Send a user message to Codex
+   */
+  async sendUserMessage(
+    panelId: string,
+    conversationId: string,
+    message: string
+  ): Promise<void> {
+    const rpcId = this.nextRequestId();
+    this.enqueuePendingUserTurn(panelId, rpcId);
+
+    const request: JsonRpcRequest = {
+      id: rpcId,
+      method: 'sendUserMessage',
+      params: {
+        conversationId,
+        items: [{ type: 'text', data: { text: message } }],
+      }
+    };
+
+    {
+      const proc = this.processes.get(panelId);
+      if (proc) this.recordRpcTimelineStart(panelId, proc.sessionId, rpcId, 'sendUserMessage', request.params);
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      this.pendingRequests.set(rpcId, { resolve: resolve as unknown as (value: unknown) => void, reject, label: 'sendUserMessage' });
+      this.sendRpcMessage(panelId, request);
+      setTimeout(() => {
+        if (this.pendingRequests.has(rpcId)) {
+          this.pendingRequests.delete(rpcId);
+          this.dropPendingUserTurn(panelId, rpcId);
+          this.finishRpcTimeline(rpcId, 'failed');
+          reject(new Error('Request sendUserMessage timed out'));
+        }
+      }, 30000);
+    });
+  }
+
+  /**
+   * Add listener for conversation events
+   */
+  async addConversationListener(panelId: string, conversationId: string): Promise<void> {
+    await this.sendRpcRequest(panelId, 'addConversationListener', {
+      conversationId,
+      experimentalRawEvents: false,
+    });
+  }
+
+  /**
+   * Resume an existing conversation
+   */
+  async resumeConversation(
+    panelId: string,
+    sessionPath: string
+  ): Promise<{ conversationId: string; rolloutPath?: string }> {
+    return this.sendRpcRequest(panelId, 'resumeConversation', {
+      path: sessionPath,
+    });
+  }
+
+  /**
+   * Spawn the app-server process and start/resume a conversation.
+   */
+  async spawn(options: ExecutorSpawnOptions): Promise<void> {
+    const { panelId, worktreePath, prompt } = options;
+    const codexOptions = options as CodexSpawnOptions;
+    const isResume = Boolean(options.isResume);
+    const resumePath = typeof options.agentSessionId === 'string' ? options.agentSessionId : '';
+
+    // Spawn the app-server process
+    await super.spawn(options);
+
+    // Wait a bit for process to start
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Initialize connection
+    await this.initialize(panelId);
+
+    const overrides = {
+      cwd: worktreePath,
+      model: codexOptions.model,
+      sandbox: codexOptions.sandbox,
+      approvalPolicy: codexOptions.askForApproval,
+    };
+
+    // Create or resume conversation
+    const convo = isResume && resumePath
+      ? await this.resumeConversation(panelId, resumePath)
+      : await this.newConversation(panelId, overrides);
+
+    if (!convo || typeof convo !== 'object') {
+      throw new Error(`Codex ${isResume && resumePath ? 'resumeConversation' : 'newConversation'} returned ${convo === null ? 'null' : typeof convo}`);
+    }
+
+    const conversationId = convo.conversationId;
+    if (!conversationId) {
+      throw new Error('Codex did not return a conversationId');
+    }
+    const rolloutPath = convo.rolloutPath ? String(convo.rolloutPath) : undefined;
+    this.conversationIdByPanel.set(panelId, { conversationId, rolloutPath });
+
+    // Persist resume token (rollout path) for future runs
+    if (rolloutPath) {
+      this.emit('agentSessionId', { panelId, sessionId: options.sessionId, agentSessionId: rolloutPath });
+    }
+
+    // Add listener for events
+    await this.addConversationListener(panelId, conversationId);
+
+    // Send initial prompt
+    if (prompt) {
+      await this.sendUserMessage(panelId, conversationId, prompt);
+    }
+  }
+
+  sendInput(panelId: string, input: string): void {
+    const convo = this.conversationIdByPanel.get(panelId);
+    if (!convo?.conversationId) {
+      throw new Error(`Codex conversation not initialized for panel ${panelId}`);
+    }
+    void this.sendUserMessage(panelId, convo.conversationId, input);
+  }
+}
+
+export default CodexExecutor;

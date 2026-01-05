@@ -1,0 +1,211 @@
+import type { IpcMain } from 'electron';
+import type { AppServices } from './types';
+import { panelManager } from '../../features/panels/PanelManager';
+import { ClaudePanelManager } from '../../features/panels/ai/ClaudePanelManager';
+import { CodexPanelManager } from '../../features/panels/ai/CodexPanelManager';
+import type { AIPanelState } from '@snowtree/core/types/aiPanelConfig';
+import { randomUUID } from 'crypto';
+
+type MinimalCreateSessionRequest = {
+  projectId: number;
+  prompt?: string;
+  toolType?: 'claude' | 'codex' | 'none';
+  baseBranch?: string;
+};
+
+export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices): void {
+  const {
+    sessionManager,
+    taskQueue,
+    gitStatusManager,
+    claudeExecutor,
+    codexExecutor,
+    logger,
+    configManager,
+    worktreeManager,
+    databaseService
+  } = services;
+
+  let claudePanelManager: ClaudePanelManager | null = null;
+  let codexPanelManager: CodexPanelManager | null = null;
+
+  const ensureClaudePanelManager = () => {
+    if (!claudePanelManager) {
+      claudePanelManager = new ClaudePanelManager(claudeExecutor, sessionManager, logger, configManager);
+    }
+    return claudePanelManager;
+  };
+
+  const ensureCodexPanelManager = () => {
+    if (!codexPanelManager) {
+      codexPanelManager = new CodexPanelManager(codexExecutor, sessionManager, logger, configManager);
+    }
+    return codexPanelManager;
+  };
+
+  ipcMain.handle('sessions:get-all', async () => {
+    try {
+      return { success: true, data: sessionManager.getAllSessions() };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to load sessions' };
+    }
+  });
+
+  ipcMain.handle('sessions:get', async (_event, sessionId: string) => {
+    try {
+      const session = sessionManager.getSession(sessionId);
+      if (!session) return { success: false, error: 'Session not found' };
+      return { success: true, data: session };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to load session' };
+    }
+  });
+
+  ipcMain.handle('sessions:create', async (_event, request: MinimalCreateSessionRequest) => {
+    try {
+      if (!taskQueue) return { success: false, error: 'Task queue not initialized' };
+      const sessionId = randomUUID();
+      const job = await taskQueue.createSession({
+        sessionId,
+        prompt: request.prompt ?? '',
+        worktreeTemplate: '',
+        projectId: request.projectId,
+        baseBranch: request.baseBranch,
+        toolType: request.toolType ?? 'claude',
+      });
+      void job;
+      return { success: true, data: { id: sessionId } };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to create session' };
+    }
+  });
+
+  ipcMain.handle('sessions:stop', async (_event, sessionId: string) => {
+    try {
+      const panels = panelManager.getPanelsForSession(sessionId);
+      for (const panel of panels) {
+        if (panel.type === 'claude') {
+          await claudeExecutor.kill(panel.id);
+        } else if (panel.type === 'codex') {
+          await codexExecutor.kill(panel.id);
+        }
+      }
+      sessionManager.updateSessionStatus(sessionId, 'stopped');
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to stop session' };
+    }
+  });
+
+  ipcMain.handle('sessions:delete', async (_event, sessionId: string) => {
+    try {
+      const session = sessionManager.getSession(sessionId);
+      if (!session) return { success: false, error: 'Session not found' };
+
+      // Stop any running panels first
+      const panels = panelManager.getPanelsForSession(sessionId);
+      for (const panel of panels) {
+        if (panel.type === 'claude') {
+          await claudeExecutor.kill(panel.id);
+        } else if (panel.type === 'codex') {
+          await codexExecutor.kill(panel.id);
+        }
+      }
+
+      // Remove worktree folder if it's a worktree (never delete the main repo folder)
+      try {
+        const projectId = session.projectId;
+        if (projectId) {
+          const project = databaseService.getProject(projectId);
+          if (project?.path && session.worktreePath && session.worktreePath !== project.path) {
+            await worktreeManager.removeWorktreePath(project.path, session.worktreePath);
+          }
+        }
+      } catch {
+        // best-effort; deletion should still proceed
+      }
+
+      sessionManager.deleteSessionPermanently(sessionId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to delete session' };
+    }
+  });
+
+  ipcMain.handle('sessions:set-active-session', async (_event, sessionId: string | null) => {
+    try {
+      gitStatusManager.setActiveSession(sessionId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to set active session' };
+    }
+  });
+
+  ipcMain.handle('sessions:get-timeline', async (_event, sessionId: string) => {
+    try {
+      const events = sessionManager.getTimelineEvents(sessionId);
+      return { success: true, data: events };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to load timeline' };
+    }
+  });
+
+  ipcMain.handle('panels:continue', async (_event, panelId: string, input: string, _model?: string, _options?: { skipCheckpointAutoCommit?: boolean }) => {
+    let sessionIdForError: string | null = null;
+    try {
+      const panel = panelManager.getPanel(panelId);
+      if (!panel) return { success: false, error: 'Panel not found' };
+
+      const session = sessionManager.getSession(panel.sessionId);
+      if (!session?.worktreePath) return { success: false, error: 'Session worktree not available' };
+      sessionIdForError = session.id;
+
+      sessionManager.updateSessionStatus(session.id, 'running');
+      sessionManager.addPanelConversationMessage(panelId, 'user', input);
+
+      // IMPORTANT: PanelManager caches panel state; agent resume tokens are persisted via SessionManager/db.
+      // Always read the latest persisted agent session id from the database to preserve conversation context.
+      const persistedAgentSessionId = sessionManager.getPanelAgentSessionId(panelId);
+
+      if (panel.type === 'claude') {
+        const manager = ensureClaudePanelManager();
+        manager.registerPanel(panelId, session.id, panel.state?.customState as AIPanelState | undefined, false);
+        if (typeof persistedAgentSessionId === 'string' && persistedAgentSessionId) {
+          manager.setAgentSessionId(panelId, persistedAgentSessionId);
+        }
+
+        if (claudeExecutor.isRunning(panelId)) {
+          manager.sendInputToPanel(panelId, input);
+        } else {
+          const history = sessionManager.getPanelConversationMessages(panelId);
+          await manager.continuePanel(panelId, session.worktreePath, input, history);
+        }
+        return { success: true };
+      }
+
+      if (panel.type === 'codex') {
+        const manager = ensureCodexPanelManager();
+        manager.registerPanel(panelId, session.id, panel.state?.customState as AIPanelState | undefined, false);
+        if (typeof persistedAgentSessionId === 'string' && persistedAgentSessionId) {
+          manager.setAgentSessionId(panelId, persistedAgentSessionId);
+        }
+
+        if (codexExecutor.isRunning(panelId)) {
+          manager.sendInputToPanel(panelId, input);
+        } else {
+          const history = sessionManager.getPanelConversationMessages(panelId);
+          await manager.continuePanel(panelId, session.worktreePath, input, history);
+        }
+        return { success: true };
+      }
+
+      return { success: false, error: `Unsupported panel type: ${panel.type}` };
+    } catch (error) {
+      sessionManager.addPanelConversationMessage(panelId, 'assistant', `Error: ${error instanceof Error ? error.message : String(error)}`);
+      if (sessionIdForError) {
+        sessionManager.updateSessionStatus(sessionIdForError, 'error', error instanceof Error ? error.message : String(error));
+      }
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to continue panel' };
+    }
+  });
+}

@@ -1,0 +1,131 @@
+import type { Session, GitStatus } from './session';
+import type { TimelineEvent } from './timeline';
+import type { DiffTarget } from './diff';
+import type { ToolPanel } from '@snowtree/core/types/panels';
+
+export interface IPCResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  details?: string;
+  command?: string;
+}
+
+export type ProjectDTO = {
+  id: number;
+  name: string;
+  path: string;
+  active?: boolean;
+};
+
+export type GitDiffStatsDTO = {
+  additions: number;
+  deletions: number;
+  filesChanged: number;
+};
+
+export type GitDiffResultDTO = {
+  diff: string;
+  stats: GitDiffStatsDTO;
+  changedFiles: string[];
+  beforeHash?: string;
+  afterHash?: string;
+  workingTree?: {
+    staged: Array<{ path: string; additions: number; deletions: number; type: 'added' | 'deleted' | 'modified' | 'renamed' }>;
+    unstaged: Array<{ path: string; additions: number; deletions: number; type: 'added' | 'deleted' | 'modified' | 'renamed' }>;
+    untracked: Array<{ path: string; additions: number; deletions: number; type: 'added' | 'deleted' | 'modified' | 'renamed' }>;
+  };
+};
+
+export type ExecutionDTO = {
+  id: number;
+  commit_message: string;
+  timestamp: string;
+  stats_additions: number;
+  stats_deletions: number;
+  stats_files_changed: number;
+  after_commit_hash: string;
+  parent_commit_hash?: string | null;
+  author?: string;
+};
+
+export interface ElectronAPI {
+  invoke: (channel: string, ...args: unknown[]) => Promise<unknown>;
+
+  aiTools: {
+    getStatus: (options?: { force?: boolean }) => Promise<IPCResponse<unknown>>;
+    getSettings: () => Promise<IPCResponse<unknown>>;
+  };
+
+  dialog: {
+    openDirectory: (options?: Electron.OpenDialogOptions) => Promise<IPCResponse<string | null>>;
+  };
+
+  projects: {
+    getAll: () => Promise<IPCResponse<ProjectDTO[]>>;
+    create: (request: { name: string; path: string; active: boolean }) => Promise<IPCResponse<unknown>>;
+    delete: (projectId: number) => Promise<IPCResponse<unknown>>;
+    getWorktrees: (projectId: number, sessionId?: string | null) => Promise<IPCResponse<Array<{
+      path: string;
+      head: string;
+      branch: string | null;
+      detached: boolean;
+      locked: boolean;
+      prunable: boolean;
+      isMain: boolean;
+      hasChanges: boolean;
+      createdAt: string | null;
+      lastCommitAt: string | null;
+      additions: number;
+      deletions: number;
+      filesChanged: number;
+    }>>>;
+    removeWorktree: (projectId: number, worktreePath: string, sessionId?: string | null) => Promise<IPCResponse<unknown>>;
+    renameWorktree: (projectId: number, worktreePath: string, nextName: string, sessionId?: string | null) => Promise<IPCResponse<{ path: string } | unknown>>;
+  };
+
+  sessions: {
+    getAll: () => Promise<IPCResponse<Session[]>>;
+    get: (sessionId: string) => Promise<IPCResponse<Session>>;
+    create: (request: { projectId: number; prompt?: string; toolType?: 'claude' | 'codex' | 'none'; baseBranch?: string }) => Promise<IPCResponse<{ id: string }>>;
+    stop: (sessionId: string) => Promise<IPCResponse<unknown>>;
+    delete: (sessionId: string) => Promise<IPCResponse<unknown>>;
+    openWorktree: (request: { projectId: number; worktreePath: string; branch?: string | null }) => Promise<IPCResponse<{ id: string }>>;
+    getTimeline: (sessionId: string) => Promise<IPCResponse<TimelineEvent[]>>;
+    getExecutions: (sessionId: string) => Promise<IPCResponse<ExecutionDTO[]>>;
+    getDiff: (sessionId: string, target: DiffTarget) => Promise<IPCResponse<GitDiffResultDTO>>;
+    getGitCommands: (sessionId: string) => Promise<IPCResponse<{ currentBranch: string }>>;
+  };
+
+  panels: {
+    create: (request: { sessionId: string; type: 'claude' | 'codex'; name?: string }) => Promise<IPCResponse<ToolPanel>>;
+    list: (sessionId: string) => Promise<IPCResponse<ToolPanel[]>>;
+    continue: (panelId: string, input: string, model?: string, options?: { skipCheckpointAutoCommit?: boolean }) => Promise<IPCResponse<unknown>>;
+  };
+
+  updater: {
+    download: () => Promise<IPCResponse<unknown>>;
+    install: () => Promise<IPCResponse<unknown>>;
+  };
+
+  events: {
+    onSessionsLoaded: (callback: (sessions: Session[]) => void) => () => void;
+    onSessionCreated: (callback: (session: Session) => void) => () => void;
+    onSessionUpdated: (callback: (session: Session) => void) => () => void;
+    onSessionDeleted: (callback: (data: { id?: string; sessionId?: string } | string) => void) => () => void;
+    onGitStatusUpdated: (callback: (data: { sessionId: string; gitStatus: GitStatus }) => void) => () => void;
+    onGitStatusLoading: (callback: (data: { sessionId: string }) => void) => () => void;
+    onTimelineEvent: (callback: (data: { sessionId: string; event: TimelineEvent }) => void) => () => void;
+    onAssistantStream: (callback: (data: { sessionId: string; panelId: string; content: string }) => void) => () => void;
+    onUpdateAvailable: (callback: (version: string) => void) => () => void;
+    onUpdateDownloaded: (callback: () => void) => () => void;
+  };
+}
+
+declare global {
+  interface Window {
+    electronAPI: ElectronAPI;
+  }
+}
+
+export {};

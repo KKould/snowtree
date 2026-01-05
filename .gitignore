@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+dist-electron/
+*.tsbuildinfo
+tools/dev-*/
+
+# Logs
+*.log
+
+# Environment
+.env
+
+# Database
+*.sqlite
+*.db
+
+# Git worktrees
+worktrees/
+
+# macOS
+.DS_Store

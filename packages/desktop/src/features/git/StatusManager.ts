@@ -23,7 +23,7 @@ export class GitStatusManager extends EventEmitter {
   // Smart visibility-aware polling for active sessions only
   private readonly CACHE_TTL_MS = 5000; // 5 seconds cache
   private refreshDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
-  private readonly DEBOUNCE_MS = 2000; // 2 seconds debounce to batch rapid changes
+  private readonly DEBOUNCE_MS = 250; // Keep status refresh responsive for active session
   private gitLogger: GitStatusLogger;
   private fileWatcher: GitFileWatcher;
   

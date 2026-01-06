@@ -1,13 +1,40 @@
 import { EventEmitter } from 'events';
-import { watch, FSWatcher } from 'fs';
+import { watch, FSWatcher, existsSync, readFileSync, statSync } from 'fs';
+import { dirname, isAbsolute, join, resolve } from 'path';
 import type { Logger } from '../../infrastructure/logging/logger';
 
 interface WatchedSession {
   sessionId: string;
   worktreePath: string;
   watcher?: FSWatcher;
+  gitWatchers?: FSWatcher[];
   lastModified: number;
   pendingRefresh: boolean;
+}
+
+export function resolveGitDir(worktreePath: string): string | null {
+  const dotGit = join(worktreePath, '.git');
+  if (!existsSync(dotGit)) return null;
+
+  try {
+    const stat = statSync(dotGit);
+    if (stat.isDirectory()) return dotGit;
+  } catch {
+    // ignore
+  }
+
+  // In a linked worktree, `.git` is a file containing `gitdir: <path>`
+  try {
+    const content = readFileSync(dotGit, 'utf8').trim();
+    const m = content.match(/^gitdir:\s*(.+)\s*$/i);
+    if (!m) return null;
+    const raw = m[1].trim();
+    if (!raw) return null;
+    const base = dirname(dotGit);
+    return isAbsolute(raw) ? raw : resolve(base, raw);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -21,7 +48,8 @@ interface WatchedSession {
 export class GitFileWatcher extends EventEmitter {
   private watchedSessions: Map<string, WatchedSession> = new Map();
   private refreshDebounceTimers: Map<string, NodeJS.Timeout> = new Map();
-  private readonly DEBOUNCE_MS = 1500; // 1.5 second debounce for file changes
+  private readonly WORKTREE_DEBOUNCE_MS = 200; // fast for UI responsiveness
+  private readonly GIT_DEBOUNCE_MS = 50; // index/HEAD updates should feel instant
   private readonly IGNORE_PATTERNS = [
     '.git/',
     'node_modules/',
@@ -49,17 +77,35 @@ export class GitFileWatcher extends EventEmitter {
     this.logger?.info(`[GitFileWatcher] Starting watch for session ${sessionId} at ${worktreePath}`);
 
     try {
-      // Create a watcher for the worktree directory
-      const watcher = watch(worktreePath, { recursive: true }, (eventType, filename) => {
-        if (filename) {
-          this.handleFileChange(sessionId, filename, eventType);
-        }
-      });
+      let watcher: FSWatcher | undefined;
+      try {
+        // Prefer recursive watch when available (macOS/Windows).
+        watcher = watch(worktreePath, { recursive: true }, (eventType, filename) => {
+          if (filename) {
+            this.handleFileChange(sessionId, filename, eventType);
+          } else {
+            // Some platforms do not provide filename; still refresh.
+            this.handleWorktreeUnknownChange(sessionId, eventType);
+          }
+        });
+      } catch {
+        // Fallback: non-recursive watch for top-level changes.
+        watcher = watch(worktreePath, { recursive: false }, (eventType, filename) => {
+          if (filename) {
+            this.handleFileChange(sessionId, filename, eventType);
+          } else {
+            this.handleWorktreeUnknownChange(sessionId, eventType);
+          }
+        });
+      }
+
+      const gitWatchers = this.startGitMetadataWatch(sessionId, worktreePath);
 
       this.watchedSessions.set(sessionId, {
         sessionId,
         worktreePath,
         watcher,
+        gitWatchers,
         lastModified: Date.now(),
         pendingRefresh: false
       });
@@ -75,6 +121,9 @@ export class GitFileWatcher extends EventEmitter {
     const session = this.watchedSessions.get(sessionId);
     if (session) {
       session.watcher?.close();
+      session.gitWatchers?.forEach((w) => {
+        try { w.close(); } catch { /* ignore */ }
+      });
       this.watchedSessions.delete(sessionId);
       
       // Clear any pending refresh timer
@@ -114,7 +163,23 @@ export class GitFileWatcher extends EventEmitter {
     session.pendingRefresh = true;
 
     // Debounce the refresh to batch rapid changes
-    this.scheduleRefreshCheck(sessionId);
+    this.scheduleRefreshCheck(sessionId, this.WORKTREE_DEBOUNCE_MS);
+  }
+
+  private handleWorktreeUnknownChange(sessionId: string, eventType: string): void {
+    const session = this.watchedSessions.get(sessionId);
+    if (!session) return;
+    session.lastModified = Date.now();
+    session.pendingRefresh = true;
+    this.scheduleRefreshCheck(sessionId, this.WORKTREE_DEBOUNCE_MS);
+  }
+
+  private handleGitMetadataChange(sessionId: string, filename: string, eventType: string): void {
+    const session = this.watchedSessions.get(sessionId);
+    if (!session) return;
+    session.lastModified = Date.now();
+    session.pendingRefresh = true;
+    this.scheduleRefreshCheck(sessionId, this.GIT_DEBOUNCE_MS);
   }
 
   /**
@@ -155,10 +220,51 @@ export class GitFileWatcher extends EventEmitter {
     return false;
   }
 
+  private startGitMetadataWatch(sessionId: string, worktreePath: string): FSWatcher[] {
+    const gitdir = resolveGitDir(worktreePath);
+    if (!gitdir) return [];
+
+    // Zed-style: watch git metadata files that reflect status changes instantly.
+    const paths = [
+      join(gitdir, 'index'),
+      join(gitdir, 'HEAD'),
+      join(gitdir, 'logs', 'HEAD'),
+      join(gitdir, 'packed-refs'),
+    ];
+
+    const watchers: FSWatcher[] = [];
+
+    for (const p of paths) {
+      try {
+        const w = watch(p, { persistent: true }, (eventType) => {
+          this.handleGitMetadataChange(sessionId, p, eventType);
+        });
+        watchers.push(w);
+      } catch {
+        // ignore missing files / unsupported watch
+      }
+    }
+
+    // Also watch the gitdir itself for ref changes (best-effort, non-recursive).
+    try {
+      const w = watch(gitdir, { persistent: true }, (eventType, filename) => {
+        const name = filename ? String(filename) : '';
+        if (name.startsWith('refs') || name === 'refs' || name === 'packed-refs') {
+          this.handleGitMetadataChange(sessionId, join(gitdir, name), eventType);
+        }
+      });
+      watchers.push(w);
+    } catch {
+      // ignore
+    }
+
+    return watchers;
+  }
+
   /**
    * Schedule a refresh check for a session
    */
-  private scheduleRefreshCheck(sessionId: string): void {
+  private scheduleRefreshCheck(sessionId: string, debounceMs: number): void {
     // Clear existing timer
     const existingTimer = this.refreshDebounceTimers.get(sessionId);
     if (existingTimer) {
@@ -169,7 +275,7 @@ export class GitFileWatcher extends EventEmitter {
     const timer = setTimeout(() => {
       this.refreshDebounceTimers.delete(sessionId);
       this.performRefreshCheck(sessionId);
-    }, this.DEBOUNCE_MS);
+    }, debounceMs);
 
     this.refreshDebounceTimers.set(sessionId, timer);
   }

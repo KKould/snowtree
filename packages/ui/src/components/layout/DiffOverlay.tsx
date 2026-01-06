@@ -5,26 +5,6 @@ import { API } from '../../utils/api';
 import { withTimeout } from '../../utils/withTimeout';
 import type { DiffOverlayProps } from './types';
 
-// Extract diff for a specific file from combined diff
-const extractFileDiff = (fullDiff: string, targetPath: string): string => {
-  if (!fullDiff || !targetPath) return fullDiff;
-
-  const fileMatches = fullDiff.match(/diff --git[\s\S]*?(?=diff --git|$)/g);
-  if (!fileMatches) return fullDiff;
-
-  for (const fileDiff of fileMatches) {
-    const fileNameMatch = fileDiff.match(/diff --git a\/(.*?) b\/(.*?)(?:\n|$)/);
-    if (fileNameMatch) {
-      const newFileName = fileNameMatch[2] || fileNameMatch[1] || '';
-      if (newFileName === targetPath || newFileName.endsWith('/' + targetPath)) {
-        return fileDiff;
-      }
-    }
-  }
-
-  return fullDiff;
-};
-
 const border = 'color-mix(in srgb, var(--st-border) 70%, transparent)';
 const hoverBg = 'color-mix(in srgb, var(--st-hover) 42%, transparent)';
 
@@ -61,6 +41,9 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
   banner
 }) => {
   const [diff, setDiff] = useState<string | null>(null);
+  const [stagedDiff, setStagedDiff] = useState<string | null>(null);
+  const [unstagedDiff, setUnstagedDiff] = useState<string | null>(null);
+  const [fileSource, setFileSource] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -94,28 +77,13 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
 
   const viewerFiles = files.length > 0 ? files : derivedFiles;
 
-  // Handle keyboard shortcuts
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Escape to close
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
-
   // Load diff
   useEffect(() => {
     if (!isOpen || !sessionId || !target) {
       setDiff(null);
+      setStagedDiff(null);
+      setUnstagedDiff(null);
+      setFileSource(null);
       return;
     }
 
@@ -124,19 +92,54 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
       setError(null);
 
       try {
-        const response = await withTimeout(API.sessions.getDiff(sessionId, target), 15_000, 'Load diff');
-        if (response.success && response.data) {
-          setDiff(response.data.diff ?? '');
-        } else {
-          const message = response.error || 'Failed to load diff';
-          const isStaleCommit =
-            target.kind === 'commit' &&
-            /commit not found|bad object|unknown revision|invalid object name|ambiguous argument/i.test(message);
-          if (isStaleCommit) {
-            onClose();
-            return;
+        if (target.kind === 'working' && filePath) {
+          const [allRes, stagedRes, unstagedRes] = await Promise.all([
+            withTimeout(API.sessions.getDiff(sessionId, { kind: 'working', scope: 'all' } as any), 15_000, 'Load diff'),
+            withTimeout(API.sessions.getDiff(sessionId, { kind: 'working', scope: 'staged' } as any), 15_000, 'Load staged diff'),
+            withTimeout(API.sessions.getDiff(sessionId, { kind: 'working', scope: 'unstaged' } as any), 15_000, 'Load unstaged diff'),
+          ]);
+
+          if (!allRes.success) throw new Error(allRes.error || 'Failed to load diff');
+          if (!stagedRes.success) throw new Error(stagedRes.error || 'Failed to load staged diff');
+          if (!unstagedRes.success) throw new Error(unstagedRes.error || 'Failed to load unstaged diff');
+
+          setDiff(allRes.data?.diff ?? '');
+          setStagedDiff(stagedRes.data?.diff ?? '');
+          setUnstagedDiff(unstagedRes.data?.diff ?? '');
+
+          // Best-effort: HEAD may not contain new/untracked files.
+          const preferredRef = target.scope === 'untracked' ? 'WORKTREE' : 'HEAD';
+          let sourceRes = await withTimeout(
+            API.sessions.getFileContent(sessionId, { filePath, ref: preferredRef, maxBytes: 1024 * 1024 }),
+            15_000,
+            'Load file content'
+          );
+          if (!sourceRes.success && preferredRef !== 'WORKTREE') {
+            sourceRes = await withTimeout(
+              API.sessions.getFileContent(sessionId, { filePath, ref: 'WORKTREE', maxBytes: 1024 * 1024 }),
+              15_000,
+              'Load file content'
+            );
           }
-          setError(message);
+          setFileSource(sourceRes.success ? (sourceRes.data?.content ?? '') : '');
+        } else {
+          const response = await withTimeout(API.sessions.getDiff(sessionId, target), 15_000, 'Load diff');
+          if (response.success && response.data) {
+            setDiff(response.data.diff ?? '');
+            setStagedDiff(null);
+            setUnstagedDiff(null);
+            setFileSource(null);
+          } else {
+            const message = response.error || 'Failed to load diff';
+            const isStaleCommit =
+              target.kind === 'commit' &&
+              /commit not found|bad object|unknown revision|invalid object name|ambiguous argument/i.test(message);
+            if (isStaleCommit) {
+              onClose();
+              return;
+            }
+            setError(message);
+          }
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load diff');
@@ -155,19 +158,38 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
     setError(null);
 
     try {
-      const response = await withTimeout(API.sessions.getDiff(sessionId, target), 15_000, 'Load diff');
-      if (response.success && response.data) {
-        setDiff(response.data.diff ?? '');
+      if (target.kind === 'working' && filePath) {
+        const [allRes, stagedRes, unstagedRes] = await Promise.all([
+          withTimeout(API.sessions.getDiff(sessionId, { kind: 'working', scope: 'all' } as any), 15_000, 'Load diff'),
+          withTimeout(API.sessions.getDiff(sessionId, { kind: 'working', scope: 'staged' } as any), 15_000, 'Load staged diff'),
+          withTimeout(API.sessions.getDiff(sessionId, { kind: 'working', scope: 'unstaged' } as any), 15_000, 'Load unstaged diff'),
+        ]);
+
+        if (!allRes.success) throw new Error(allRes.error || 'Failed to load diff');
+        if (!stagedRes.success) throw new Error(stagedRes.error || 'Failed to load staged diff');
+        if (!unstagedRes.success) throw new Error(unstagedRes.error || 'Failed to load unstaged diff');
+
+        setDiff(allRes.data?.diff ?? '');
+        setStagedDiff(stagedRes.data?.diff ?? '');
+        setUnstagedDiff(unstagedRes.data?.diff ?? '');
       } else {
-        const message = response.error || 'Failed to load diff';
-        const isStaleCommit =
-          target.kind === 'commit' &&
-          /commit not found|bad object|unknown revision|invalid object name|ambiguous argument/i.test(message);
-        if (isStaleCommit) {
-          onClose();
-          return;
+        const response = await withTimeout(API.sessions.getDiff(sessionId, target), 15_000, 'Load diff');
+        if (response.success && response.data) {
+          setDiff(response.data.diff ?? '');
+          setStagedDiff(null);
+          setUnstagedDiff(null);
+          setFileSource(null);
+        } else {
+          const message = response.error || 'Failed to load diff';
+          const isStaleCommit =
+            target.kind === 'commit' &&
+            /commit not found|bad object|unknown revision|invalid object name|ambiguous argument/i.test(message);
+          if (isStaleCommit) {
+            onClose();
+            return;
+          }
+          setError(message);
         }
-        setError(message);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load diff');
@@ -203,6 +225,7 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
   return (
     <div
       className="absolute inset-0 z-[60] flex flex-col st-bg"
+      data-testid="diff-overlay"
     >
       {/* Header */}
       <div
@@ -218,6 +241,7 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
           <button
             type="button"
             onClick={onClose}
+            data-testid="diff-overlay-back"
             className="flex items-center gap-1.5 px-2 py-1.5 rounded st-hoverable st-focus-ring"
             style={{ color: 'var(--st-text-muted)' }}
           >
@@ -275,7 +299,7 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
           <IconButton
             onClick={handleRefresh}
             disabled={loading}
-            title="Refresh (R)"
+            title="Refresh"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </IconButton>
@@ -283,54 +307,23 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
           {/* Close button */}
           <IconButton
             onClick={onClose}
-            title="Close (Esc)"
+            title="Close"
           >
             <X className="w-4 h-4" />
           </IconButton>
         </div>
       </div>
 
-      {/* Keyboard shortcuts hint - only show for staged/unstaged working tree */}
+      {/* Diff usage hint - only show for staged/unstaged working tree */}
       {(workingScope === 'staged' || workingScope === 'unstaged') && (
         <div
           className="px-3 py-1.5 flex items-center gap-3"
           style={{ backgroundColor: 'var(--st-surface)', borderBottom: `1px solid ${border}` }}
         >
           <span className="text-[11px]" style={{ color: 'var(--st-text-faint)' }}>
-            💡 <span style={{ color: 'var(--st-text)' }}>Click</span> line or
-            <kbd style={{
-              backgroundColor: 'var(--st-hover)',
-              padding: '1px 4px',
-              borderRadius: '2px',
-              marginLeft: '4px',
-              marginRight: '4px',
-              fontFamily: 'monospace',
-              fontSize: '10px',
-              color: 'var(--st-text)'
-            }}>1</kbd>
-            to {workingScope === 'unstaged' ? 'stage' : 'unstage'} •
-            <kbd style={{
-              backgroundColor: 'var(--st-hover)',
-              padding: '1px 4px',
-              borderRadius: '2px',
-              marginLeft: '6px',
-              marginRight: '4px',
-              fontFamily: 'monospace',
-              fontSize: '10px',
-              color: 'var(--st-text)'
-            }}>v</kbd>
-            for multi-select •
-            <kbd style={{
-              backgroundColor: 'var(--st-hover)',
-              padding: '1px 4px',
-              borderRadius: '2px',
-              marginLeft: '6px',
-              marginRight: '4px',
-              fontFamily: 'monospace',
-              fontSize: '10px',
-              color: 'var(--st-text)'
-            }}>a</kbd>
-            to {workingScope === 'unstaged' ? 'stage' : 'unstage'} all
+            {filePath
+              ? 'Hover a hunk to stage/unstage/restore.'
+              : `Click line numbers to select. Use the +/- button to ${workingScope === 'unstaged' ? 'stage' : 'unstage'} a line or hunk.`}
           </span>
         </div>
       )}
@@ -402,13 +395,15 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
           </div>
         ) : diff ? (
           <ZedDiffViewer
-            diff={filePath ? extractFileDiff(diff, filePath) : diff}
-            filePath={filePath || undefined}
-            filesMeta={viewerFiles}
+            diff={diff}
+            scrollToFilePath={filePath || undefined}
             className="h-full"
             sessionId={sessionId}
-            currentScope={target?.kind === 'working' ? (target.scope as 'staged' | 'unstaged' | undefined) : undefined}
-            onLineStaged={handleRefresh}
+            currentScope={target?.kind === 'working' ? (target.scope as any) : undefined}
+            stagedDiff={stagedDiff ?? undefined}
+            unstagedDiff={unstagedDiff ?? undefined}
+            fileSources={filePath && fileSource != null ? { [filePath]: fileSource } : undefined}
+            onChanged={handleRefresh}
           />
         ) : (
           <div

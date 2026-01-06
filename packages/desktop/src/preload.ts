@@ -57,15 +57,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDiff: (sessionId: string, target: { kind: 'working' } | { kind: 'commit'; hash: string }): Promise<IPCResponse> =>
       ipcRenderer.invoke('sessions:get-diff', sessionId, target),
     getGitCommands: (sessionId: string): Promise<IPCResponse> => ipcRenderer.invoke('sessions:get-git-commands', sessionId),
-    stageLine: (sessionId: string, options: {
+    getFileContent: (sessionId: string, options: { filePath: string; ref: 'HEAD' | 'INDEX' | 'WORKTREE'; maxBytes?: number }): Promise<IPCResponse> =>
+      ipcRenderer.invoke('sessions:get-file-content', sessionId, options),
+    stageHunk: (sessionId: string, options: {
       filePath: string;
       isStaging: boolean;
-      targetLine: {
-        type: 'added' | 'deleted';
-        oldLineNumber: number | null;
-        newLineNumber: number | null;
-      };
-    }): Promise<IPCResponse> => ipcRenderer.invoke('sessions:stage-line', sessionId, options),
+      hunkHeader: string;
+    }): Promise<IPCResponse> => ipcRenderer.invoke('sessions:stage-hunk', sessionId, options),
+    restoreHunk: (sessionId: string, options: {
+      filePath: string;
+      scope: 'staged' | 'unstaged';
+      hunkHeader: string;
+    }): Promise<IPCResponse> => ipcRenderer.invoke('sessions:restore-hunk', sessionId, options),
+    changeAllStage: (sessionId: string, options: { stage: boolean }): Promise<IPCResponse> =>
+      ipcRenderer.invoke('sessions:change-all-stage', sessionId, options),
+    changeFileStage: (sessionId: string, options: { filePath: string; stage: boolean }): Promise<IPCResponse> =>
+      ipcRenderer.invoke('sessions:change-file-stage', sessionId, options),
   },
 
   panels: {

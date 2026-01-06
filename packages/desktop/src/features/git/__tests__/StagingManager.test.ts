@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { GitStagingManager } from '../StagingManager';
 import type { GitExecutor } from '../../../executors/git';
 import * as fs from 'fs';
-import * as path from 'path';
 
 // Mock fs promises
 vi.mock('fs', async () => {
@@ -335,7 +334,7 @@ describe('GitStagingManager', () => {
 
       // Verify git diff was called
       expect(mockGitExecutor.run).toHaveBeenNthCalledWith(1, expect.objectContaining({
-        argv: expect.arrayContaining(['git', 'diff']),
+        argv: expect.arrayContaining(['git', 'diff', '--unified=0']),
       }));
 
       // Verify git apply was called with --cached
@@ -596,6 +595,284 @@ Binary files differ`;
       const found = (stagingManager as any).findHunkContainingLine(hunks, targetLine);
 
       expect(found).toBeNull();
+    });
+  });
+
+  describe('stageHunk', () => {
+    it('should stage a full hunk from unstaged diff', async () => {
+      const mockDiff = `diff --git a/test.txt b/test.txt
+--- a/test.txt
++++ b/test.txt
+@@ -1,3 +1,4 @@
+ context
++added line
+ context2
+ context3`;
+
+      vi.mocked(mockGitExecutor.run)
+        .mockResolvedValueOnce({
+          // First call: get diff
+          exitCode: 0,
+          stdout: mockDiff,
+          stderr: '',
+          commandDisplay: 'git diff',
+        } as any)
+        .mockResolvedValueOnce({
+          // Second call: apply patch
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          commandDisplay: 'git apply',
+        } as any);
+
+      const result = await stagingManager.stageHunk({
+        worktreePath: '/tmp/project',
+        sessionId: 'test-session',
+        filePath: 'test.txt',
+        isStaging: true,
+        hunkHeader: '@@ -1,3 +1,4 @@',
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockGitExecutor.run).toHaveBeenCalledTimes(2);
+
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        argv: expect.arrayContaining(['git', 'diff']),
+      }));
+
+      expect(fs.promises.writeFile).toHaveBeenCalledTimes(1);
+      const [tempFile, patchText, encoding] = (fs.promises.writeFile as any).mock.calls[0] as [string, string, string];
+      expect(tempFile).toMatch(/snowtree-patch-.*\.patch$/);
+      expect(patchText).toContain('@@ -1,3 +1,4 @@');
+      expect(encoding).toBe('utf8');
+    });
+
+    it('should unstage a full hunk from staged diff', async () => {
+      const mockDiff = `diff --git a/test.txt b/test.txt
+--- a/test.txt
++++ b/test.txt
+@@ -1,3 +1,4 @@
+ context
++added line
+ context2
+ context3`;
+
+      vi.mocked(mockGitExecutor.run)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: mockDiff,
+          stderr: '',
+          commandDisplay: 'git diff --cached',
+        } as any)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          commandDisplay: 'git apply -R',
+        } as any);
+
+      const result = await stagingManager.stageHunk({
+        worktreePath: '/tmp/project',
+        sessionId: 'test-session',
+        filePath: 'test.txt',
+        isStaging: false,
+        hunkHeader: '@@ -1,3 +1,4 @@',
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockGitExecutor.run).toHaveBeenCalledTimes(2);
+
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        argv: expect.arrayContaining(['git', 'diff', '--cached', '--unified=0']),
+      }));
+
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        argv: expect.arrayContaining(['git', 'apply', '-R']),
+      }));
+    });
+  });
+
+  describe('restoreHunk', () => {
+    it('should restore a hunk from unstaged diff (working tree)', async () => {
+      const mockDiff = `diff --git a/test.txt b/test.txt
+--- a/test.txt
++++ b/test.txt
+@@ -1,3 +1,4 @@
+ context
++added line
+ context2
+ context3`;
+
+      vi.mocked(mockGitExecutor.run)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: mockDiff,
+          stderr: '',
+          commandDisplay: 'git diff',
+        } as any)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          commandDisplay: 'git apply -R',
+        } as any);
+
+      const result = await stagingManager.restoreHunk({
+        worktreePath: '/tmp/project',
+        sessionId: 'test-session',
+        filePath: 'test.txt',
+        scope: 'unstaged',
+        hunkHeader: '@@ -1,3 +1,4 @@',
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockGitExecutor.run).toHaveBeenCalledTimes(2);
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        argv: expect.arrayContaining(['git', 'diff', '--unified=0']),
+      }));
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        argv: expect.arrayContaining(['git', 'apply', '-R']),
+      }));
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(2, expect.not.objectContaining({
+        argv: expect.arrayContaining(['--cached']),
+      }));
+    });
+
+    it('should restore a hunk from staged diff by unstaging then restoring worktree', async () => {
+      const mockDiff = `diff --git a/test.txt b/test.txt
+--- a/test.txt
++++ b/test.txt
+@@ -1,3 +1,4 @@
+ context
++added line
+ context2
+ context3`;
+
+      vi.mocked(mockGitExecutor.run)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: mockDiff,
+          stderr: '',
+          commandDisplay: 'git diff --cached',
+        } as any)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          commandDisplay: 'git apply --cached -R',
+        } as any)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: '',
+          stderr: '',
+          commandDisplay: 'git apply -R',
+        } as any);
+
+      const result = await stagingManager.restoreHunk({
+        worktreePath: '/tmp/project',
+        sessionId: 'test-session',
+        filePath: 'test.txt',
+        scope: 'staged',
+        hunkHeader: '@@ -1,3 +1,4 @@',
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockGitExecutor.run).toHaveBeenCalledTimes(3);
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        argv: expect.arrayContaining(['git', 'diff', '--cached', '--unified=0']),
+      }));
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        argv: expect.arrayContaining(['git', 'apply', '--cached', '-R']),
+      }));
+      expect(mockGitExecutor.run).toHaveBeenNthCalledWith(3, expect.objectContaining({
+        argv: expect.arrayContaining(['git', 'apply', '-R']),
+      }));
+    });
+  });
+
+  describe('changeAllStage', () => {
+    it('should stage all using git add --all', async () => {
+      vi.mocked(mockGitExecutor.run).mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        commandDisplay: 'git add --all',
+      } as any);
+
+      const result = await stagingManager.changeAllStage({
+        worktreePath: '/tmp/project',
+        sessionId: 'test-session',
+        stage: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockGitExecutor.run).toHaveBeenCalledWith(expect.objectContaining({
+        argv: ['git', 'add', '--all'],
+      }));
+    });
+
+    it('should unstage all using git reset', async () => {
+      vi.mocked(mockGitExecutor.run).mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        commandDisplay: 'git reset',
+      } as any);
+
+      const result = await stagingManager.changeAllStage({
+        worktreePath: '/tmp/project',
+        sessionId: 'test-session',
+        stage: false,
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockGitExecutor.run).toHaveBeenCalledWith(expect.objectContaining({
+        argv: ['git', 'reset'],
+      }));
+    });
+  });
+
+  describe('changeFileStage', () => {
+    it('should stage a file using git add --all -- <file>', async () => {
+      vi.mocked(mockGitExecutor.run).mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        commandDisplay: 'git add --all -- test.txt',
+      } as any);
+
+      const result = await stagingManager.changeFileStage({
+        worktreePath: '/tmp/project',
+        sessionId: 'test-session',
+        filePath: 'test.txt',
+        stage: true,
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockGitExecutor.run).toHaveBeenCalledWith(expect.objectContaining({
+        argv: ['git', 'add', '--all', '--', 'test.txt'],
+      }));
+    });
+
+    it('should unstage a file using git reset -- <file>', async () => {
+      vi.mocked(mockGitExecutor.run).mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+        commandDisplay: 'git reset -- test.txt',
+      } as any);
+
+      const result = await stagingManager.changeFileStage({
+        worktreePath: '/tmp/project',
+        sessionId: 'test-session',
+        filePath: 'test.txt',
+        stage: false,
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockGitExecutor.run).toHaveBeenCalledWith(expect.objectContaining({
+        argv: ['git', 'reset', '--', 'test.txt'],
+      }));
     });
   });
 });

@@ -85,26 +85,21 @@ This is why 84 tests skip - they require a session/worktree which can only be cr
 - Tool selector
 - Session header and branch display
 
-### 2. Right Panel and Visual Mode (right-panel.spec.ts - 8 tests)
+### 2. Right Panel (right-panel.spec.ts - 3 tests)
 - App loading with Sidebar and RightPanel
 - Console error detection
 - Changes panel visibility
-- Visual Mode enter/exit (v/Escape keys)
-- vim navigation (j/k keys)
-- vim hints display
-- Modifier key handling
 
 ### 3. Diff Panel Operations (diff-panel.spec.ts - 4 tests)
 - File click to open diff
-- Escape key to close diff
+- Back button to close diff
 - Staged/Unstaged group display
 - Group expand/collapse
 
-### 4. Visual Mode Advanced (visual-mode-advanced.spec.ts - 4 tests)
-- gg jump to first line
-- G jump to last line
-- 1 key to stage line
-- Cross-file navigation
+### 4. Selection and Staging (stage-operations.spec.ts - 3 tests)
+- Gutter click selects a line
+- +/- stages a line
+- +/- on hunk header stages a block
 
 ### 5. Commit and PR Operations (commit-and-pr.spec.ts - 8 tests)
 - Commit button display and enable state
@@ -167,23 +162,7 @@ This is why 84 tests skip - they require a session/worktree which can only be cr
 - Network error handling
 - Rapid interaction stability
 
-### 11. Keyboard Shortcuts (keyboard-shortcuts.spec.ts - 17 tests)
-- i key to focus input
-- Escape to close overlay
-- No shortcuts when typing in input
-- Ctrl+C for copy
-- Cmd+A for select all
-- No shortcuts with modifier keys
-- Tab navigation
-- Shift+Tab reverse navigation
-- Arrow keys in file list
-- Enter on focused file
-- Space for selection
-- Prevent browser shortcuts
-- ? key for help
-- Shortcut hints in visual mode
-
-### 12. Session Lifecycle (session-lifecycle.spec.ts - 12 tests)
+### 11. Session Lifecycle (session-lifecycle.spec.ts - 12 tests)
 - Sessions list in sidebar
 - Create session on worktree click
 - Session name in header

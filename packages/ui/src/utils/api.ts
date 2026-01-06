@@ -64,20 +64,58 @@ export class API {
       return window.electronAPI.sessions.getGitCommands(sessionId);
     },
 
-    async stageLine(sessionId: string, options: {
+    async getFileContent(sessionId: string, options: { filePath: string; ref: 'HEAD' | 'INDEX' | 'WORKTREE'; maxBytes?: number }) {
+      requireElectron();
+      return window.electronAPI.sessions.getFileContent(sessionId, options);
+    },
+
+    async stageHunk(sessionId: string, options: {
       filePath: string;
       isStaging: boolean;
-      targetLine: {
-        type: 'added' | 'deleted';
-        oldLineNumber: number | null;
-        newLineNumber: number | null;
-      };
+      hunkHeader: string;
     }): Promise<{ success: boolean; error?: string }> {
       requireElectron();
-      const result = await window.electronAPI.sessions.stageLine(sessionId, options);
+      const result = await window.electronAPI.sessions.stageHunk(sessionId, options);
 
       if (!result.success) {
-        throw new Error(result.error || 'Failed to stage line');
+        throw new Error(result.error || 'Failed to stage hunk');
+      }
+
+      return result.data || { success: true };
+    },
+
+    async restoreHunk(sessionId: string, options: {
+      filePath: string;
+      scope: 'staged' | 'unstaged';
+      hunkHeader: string;
+    }): Promise<{ success: boolean; error?: string }> {
+      requireElectron();
+      const result = await window.electronAPI.sessions.restoreHunk(sessionId, options);
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to restore hunk');
+      }
+
+      return result.data || { success: true };
+    },
+
+    async changeAllStage(sessionId: string, options: { stage: boolean }): Promise<{ success: boolean; error?: string }> {
+      requireElectron();
+      const result = await window.electronAPI.sessions.changeAllStage(sessionId, options);
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to change stage state');
+      }
+
+      return result.data || { success: true };
+    },
+
+    async changeFileStage(sessionId: string, options: { filePath: string; stage: boolean }): Promise<{ success: boolean; error?: string }> {
+      requireElectron();
+      const result = await window.electronAPI.sessions.changeFileStage(sessionId, options);
+
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to change file stage state');
       }
 
       return result.data || { success: true };

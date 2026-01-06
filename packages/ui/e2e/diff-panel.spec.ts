@@ -7,69 +7,21 @@ test.describe('Diff Panel and Stage Operations', () => {
   });
 
   test('should open diff overlay when clicking file', async ({ page }) => {
-    const fileItem = page.locator('.file-item').first();
-    const fileExists = await fileItem.isVisible({ timeout: 5000 }).catch(() => false);
+    const file = page.getByTestId('right-panel-file-tracked-src/components/Example.tsx');
+    await expect(file).toBeVisible({ timeout: 15000 });
+    await file.click();
 
-    if (fileExists) {
-      await fileItem.click();
-      await page.waitForTimeout(500);
-
-      const diffOverlay = page.locator('[role="dialog"], .diff-overlay, .st-overlay').first();
-      const isVisible = await diffOverlay.isVisible({ timeout: 3000 }).catch(() => false);
-
-      if (isVisible) {
-        expect(isVisible).toBe(true);
-      }
-    }
+    await expect(page.getByTestId('diff-overlay')).toBeVisible();
+    await expect(page.getByTestId('diff-viewer-zed')).toBeVisible();
   });
 
-  test('should close diff overlay with Escape key', async ({ page }) => {
-    const fileItem = page.locator('.file-item').first();
-    const fileExists = await fileItem.isVisible({ timeout: 5000 }).catch(() => false);
+  test('should close diff overlay with Back button', async ({ page }) => {
+    const file = page.getByTestId('right-panel-file-tracked-src/components/Example.tsx');
+    await expect(file).toBeVisible({ timeout: 15000 });
+    await file.click();
 
-    if (fileExists) {
-      await fileItem.click();
-      await page.waitForTimeout(500);
-
-      const diffOverlay = page.locator('[role="dialog"], .diff-overlay, .st-overlay').first();
-      const isVisible = await diffOverlay.isVisible({ timeout: 3000 }).catch(() => false);
-
-      if (isVisible) {
-        await page.keyboard.press('Escape');
-        await page.waitForTimeout(300);
-
-        const stillVisible = await diffOverlay.isVisible().catch(() => false);
-        expect(stillVisible).toBe(false);
-      }
-    }
-  });
-
-  test('should display staged and unstaged groups', async ({ page }) => {
-    const stagedHeader = page.locator('text=/STAGED/i').first();
-    const unstagedHeader = page.locator('text=/UNSTAGED/i').first();
-
-    const hasStagedOrUnstaged =
-      (await stagedHeader.isVisible({ timeout: 5000 }).catch(() => false)) ||
-      (await unstagedHeader.isVisible({ timeout: 5000 }).catch(() => false));
-
-    if (hasStagedOrUnstaged) {
-      expect(hasStagedOrUnstaged).toBe(true);
-    }
-  });
-
-  test('should toggle group expand/collapse', async ({ page }) => {
-    const groupHeader = page.locator('text=/STAGED|UNSTAGED/i').first();
-    const headerExists = await groupHeader.isVisible({ timeout: 5000 }).catch(() => false);
-
-    if (headerExists) {
-      const initialFileCount = await page.locator('.file-item').count();
-
-      await groupHeader.click();
-      await page.waitForTimeout(300);
-
-      const afterClickFileCount = await page.locator('.file-item').count();
-
-      expect(initialFileCount !== afterClickFileCount).toBe(true);
-    }
+    await expect(page.getByTestId('diff-overlay')).toBeVisible();
+    await page.getByTestId('diff-overlay-back').click();
+    await expect(page.getByTestId('diff-overlay')).toHaveCount(0);
   });
 });

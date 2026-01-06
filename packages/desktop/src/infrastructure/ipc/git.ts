@@ -1,5 +1,7 @@
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
+import { promises as fs } from 'fs';
+import { join } from 'path';
 
 export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): void {
   const { sessionManager, gitDiffManager, gitStagingManager, gitExecutor } = services;
@@ -193,14 +195,10 @@ export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): vo
     }
   });
 
-  ipcMain.handle('sessions:stage-line', async (_event, sessionId: string, options: {
+  ipcMain.handle('sessions:stage-hunk', async (_event, sessionId: string, options: {
     filePath: string;
     isStaging: boolean;
-    targetLine: {
-      type: 'added' | 'deleted';
-      oldLineNumber: number | null;
-      newLineNumber: number | null;
-    };
+    hunkHeader: string;
   }) => {
     try {
       const session = sessionManager.getSession(sessionId);
@@ -208,20 +206,153 @@ export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): vo
         return { success: false, error: 'Session worktree not found' };
       }
 
-      const result = await gitStagingManager.stageLines({
+      const result = await gitStagingManager.stageHunk({
         worktreePath: session.worktreePath,
         sessionId,
         filePath: options.filePath,
         isStaging: options.isStaging,
-        targetLine: options.targetLine,
+        hunkHeader: options.hunkHeader,
       });
 
       return result;
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to stage line',
+        error: error instanceof Error ? error.message : 'Failed to stage hunk',
       };
+    }
+  });
+
+  ipcMain.handle('sessions:restore-hunk', async (_event, sessionId: string, options: {
+    filePath: string;
+    scope: 'staged' | 'unstaged';
+    hunkHeader: string;
+  }) => {
+    try {
+      const session = sessionManager.getSession(sessionId);
+      if (!session?.worktreePath) {
+        return { success: false, error: 'Session worktree not found' };
+      }
+
+      const result = await gitStagingManager.restoreHunk({
+        worktreePath: session.worktreePath,
+        sessionId,
+        filePath: options.filePath,
+        scope: options.scope,
+        hunkHeader: options.hunkHeader,
+      });
+
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore hunk',
+      };
+    }
+  });
+
+  ipcMain.handle('sessions:change-all-stage', async (_event, sessionId: string, options: {
+    stage: boolean;
+  }) => {
+    try {
+      const session = sessionManager.getSession(sessionId);
+      if (!session?.worktreePath) {
+        return { success: false, error: 'Session worktree not found' };
+      }
+
+      const result = await gitStagingManager.changeAllStage({
+        worktreePath: session.worktreePath,
+        sessionId,
+        stage: options.stage,
+      });
+
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to change stage state',
+      };
+    }
+  });
+
+  ipcMain.handle('sessions:change-file-stage', async (_event, sessionId: string, options: {
+    filePath: string;
+    stage: boolean;
+  }) => {
+    try {
+      const session = sessionManager.getSession(sessionId);
+      if (!session?.worktreePath) {
+        return { success: false, error: 'Session worktree not found' };
+      }
+
+      const filePath = typeof options?.filePath === 'string' ? options.filePath.trim() : '';
+      if (!filePath) return { success: false, error: 'File path is required' };
+      const stage = Boolean(options?.stage);
+
+      const result = await gitStagingManager.changeFileStage({
+        worktreePath: session.worktreePath,
+        sessionId,
+        filePath,
+        stage,
+      });
+
+      return result;
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to change file stage state',
+      };
+    }
+  });
+
+  ipcMain.handle('sessions:get-file-content', async (_event, sessionId: string, options: {
+    filePath: string;
+    ref: 'HEAD' | 'INDEX' | 'WORKTREE';
+    maxBytes?: number;
+  }) => {
+    try {
+      const session = sessionManager.getSession(sessionId);
+      if (!session?.worktreePath) {
+        return { success: false, error: 'Session worktree not found' };
+      }
+
+      const filePath = typeof options?.filePath === 'string' ? options.filePath.trim() : '';
+      if (!filePath) return { success: false, error: 'File path is required' };
+      const ref = options?.ref === 'INDEX' || options?.ref === 'WORKTREE' ? options.ref : 'HEAD';
+      const maxBytes = typeof options?.maxBytes === 'number' && options.maxBytes > 0 ? options.maxBytes : 1024 * 1024;
+
+      if (ref === 'WORKTREE') {
+        const abs = join(session.worktreePath, filePath);
+        const buf = await fs.readFile(abs);
+        if (buf.byteLength > maxBytes) {
+          return { success: false, error: `File too large (${buf.byteLength} bytes)` };
+        }
+        return { success: true, data: { content: buf.toString('utf8') } };
+      }
+
+      const object = ref === 'INDEX' ? `:${filePath}` : `HEAD:${filePath}`;
+      const result = await gitExecutor.run({
+        sessionId,
+        cwd: session.worktreePath,
+        argv: ['git', 'show', '--format=', object],
+        op: 'read',
+        recordTimeline: false,
+        meta: { source: 'ipc.git', operation: 'get-file-content', ref, filePath },
+        timeoutMs: 15_000,
+      });
+
+      if (result.exitCode !== 0) {
+        return { success: false, error: result.stderr || 'Failed to read file content' };
+      }
+
+      const content = result.stdout ?? '';
+      if (Buffer.byteLength(content, 'utf8') > maxBytes) {
+        return { success: false, error: `File too large (${Buffer.byteLength(content, 'utf8')} bytes)` };
+      }
+
+      return { success: true, data: { content } };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to read file content' };
     }
   });
 }

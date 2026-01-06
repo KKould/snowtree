@@ -10,11 +10,11 @@
     "copy:assets": "mkdirp dist/infrastructure/database/migrations dist/windows dist/assets && cp src/infrastructure/database/*.sql dist/infrastructure/database/ && cp src/infrastructure/database/migrations/*.sql dist/infrastructure/database/migrations/ && cp src/windows/*.html dist/windows/ && cp assets/snowtree-logo.png dist/assets/",
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest",
-    "test:watch": "vitest --watch",
-    "test:coverage": "vitest --coverage",
-    "test:ui": "vitest --ui",
-    "test:ci": "vitest run --coverage"
+    "test": "node scripts/vitest-electron.mjs",
+    "test:watch": "node scripts/vitest-electron.mjs --watch",
+    "test:coverage": "node scripts/vitest-electron.mjs run --coverage",
+    "test:ui": "node scripts/vitest-electron.mjs --ui",
+    "test:ci": "node scripts/vitest-electron.mjs run --coverage"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.1",

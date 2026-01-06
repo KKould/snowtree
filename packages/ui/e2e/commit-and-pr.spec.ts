@@ -16,13 +16,13 @@ test.describe('Commit and PR Operations', () => {
   });
 
   test('should enable commit button when changes exist', async ({ page }) => {
-    const stagedSection = page.locator('text=/STAGED/i').first();
-    const unstagedSection = page.locator('text=/UNSTAGED/i').first();
+    const hasAnyFile = await page
+      .locator('[data-testid^="right-panel-file-tracked-"], [data-testid^="right-panel-file-untracked-"]')
+      .first()
+      .isVisible({ timeout: 3000 })
+      .catch(() => false);
 
-    const hasStaged = await stagedSection.isVisible({ timeout: 3000 }).catch(() => false);
-    const hasUnstaged = await unstagedSection.isVisible({ timeout: 3000 }).catch(() => false);
-
-    if (hasStaged || hasUnstaged) {
+    if (hasAnyFile) {
       const commitButton = page.locator('button:has-text("Commit"), button:has-text("commit")').first();
       const isEnabled = await commitButton.isEnabled().catch(() => false);
 

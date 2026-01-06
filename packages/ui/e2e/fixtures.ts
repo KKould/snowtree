@@ -12,6 +12,11 @@ export const test = base.extend({
         pendingEvents: [] as Array<{ channel: string; data: any }>,
       };
 
+      (window as any).__e2e_lastStageHunk = null;
+      (window as any).__e2e_lastRestoreHunk = null;
+      (window as any).__e2e_lastChangeAllStage = null;
+      (window as any).__e2e_lastChangeFileStage = null;
+
       const persistMockState = () => {
         try {
           const sessions = Array.from(mockState.sessions.values());
@@ -67,59 +72,83 @@ export const test = base.extend({
         ],
       };
 
-      // Mock diff data with realistic content
-      const createMockDiff = () => ({
-        files: [
-          {
-            path: 'src/components/Example.tsx',
-            status: 'modified',
-            additions: 5,
-            deletions: 2,
-            hunks: [
-              {
-                oldStart: 10,
-                oldLines: 8,
-                newStart: 10,
-                newLines: 11,
-                lines: [
-                  { type: 'context', content: 'export const Example = () => {', oldLineNumber: 10, newLineNumber: 10 },
-                  { type: 'context', content: '  const [state, setState] = useState(false);', oldLineNumber: 11, newLineNumber: 11 },
-                  { type: 'deleted', content: '  // Old comment', oldLineNumber: 12, newLineNumber: null },
-                  { type: 'added', content: '  // Updated comment', oldLineNumber: null, newLineNumber: 12 },
-                  { type: 'added', content: '  const newFeature = true;', oldLineNumber: null, newLineNumber: 13 },
-                  { type: 'context', content: '  return (', oldLineNumber: 13, newLineNumber: 14 },
-                  { type: 'modified', content: '    <div>Example Component</div>', oldLineNumber: 14, newLineNumber: 15 },
-                  { type: 'context', content: '  );', oldLineNumber: 15, newLineNumber: 16 },
-                  { type: 'context', content: '};', oldLineNumber: 16, newLineNumber: 17 },
-                ],
-              },
-            ],
-          },
-          {
-            path: 'src/utils/helper.ts',
-            status: 'modified',
-            additions: 3,
-            deletions: 1,
-            hunks: [
-              {
-                oldStart: 1,
-                oldLines: 5,
-                newStart: 1,
-                newLines: 7,
-                lines: [
-                  { type: 'context', content: 'export function helper() {', oldLineNumber: 1, newLineNumber: 1 },
-                  { type: 'deleted', content: '  return "old";', oldLineNumber: 2, newLineNumber: null },
-                  { type: 'added', content: '  const result = "new";', oldLineNumber: null, newLineNumber: 2 },
-                  { type: 'added', content: '  console.log(result);', oldLineNumber: null, newLineNumber: 3 },
-                  { type: 'added', content: '  return result;', oldLineNumber: null, newLineNumber: 4 },
-                  { type: 'context', content: '}', oldLineNumber: 3, newLineNumber: 5 },
-                ],
-              },
-            ],
-          },
+      const mockDiffStaged = `diff --git a/src/components/Staged.tsx b/src/components/Staged.tsx
+index 1111111..2222222 100644
+--- a/src/components/Staged.tsx
++++ b/src/components/Staged.tsx
+@@ -1,3 +1,4 @@
+ export const Staged = () => {
+-  return "old";
++  return "new";
+ };
+`;
+
+      const mockDiffUnstaged = `diff --git a/src/components/Example.tsx b/src/components/Example.tsx
+index 3333333..4444444 100644
+--- a/src/components/Example.tsx
++++ b/src/components/Example.tsx
+@@ -10,7 +10,9 @@ export const Example = () => {
+   const [state, setState] = useState(false);
+-  // Old comment
++  // Updated comment
++  const newFeature = true;
+   return (
+     <div>Example Component</div>
+   );
+ };
+diff --git a/src/utils/helper.ts b/src/utils/helper.ts
+index 5555555..6666666 100644
+--- a/src/utils/helper.ts
++++ b/src/utils/helper.ts
+@@ -1,3 +1,5 @@
+ export function helper() {
+-  return "old";
++  const result = "new";
++  console.log(result);
++  return result;
+ }
+`;
+
+      const mockWorkingTree = () => ({
+        staged: [
+          { path: 'src/components/Staged.tsx', additions: 2, deletions: 1, type: 'modified' as const },
         ],
-        summary: { additions: 8, deletions: 3, filesChanged: 2 },
+        unstaged: [
+          { path: 'src/components/Example.tsx', additions: 5, deletions: 2, type: 'modified' as const },
+          { path: 'src/utils/helper.ts', additions: 3, deletions: 1, type: 'modified' as const },
+        ],
+        untracked: [
+          { path: 'src/new-file.ts', additions: 10, deletions: 0, type: 'added' as const },
+        ],
       });
+
+      const createMockDiffResult = (target: any) => {
+        if (target?.kind === 'working') {
+          const scope = target.scope || 'all';
+          const diff =
+            scope === 'staged'
+              ? mockDiffStaged
+              : scope === 'unstaged'
+                ? mockDiffUnstaged
+                : scope === 'untracked'
+                  ? ''
+                  : `${mockDiffStaged}\n${mockDiffUnstaged}`;
+
+          return {
+            diff,
+            stats: { additions: 8, deletions: 3, filesChanged: 3 },
+            changedFiles: ['src/components/Staged.tsx', 'src/components/Example.tsx', 'src/utils/helper.ts'],
+            ...(scope === 'all' ? { workingTree: mockWorkingTree() } : {}),
+          };
+        }
+
+        // Commit diff
+        return {
+          diff: `${mockDiffStaged}\n${mockDiffUnstaged}`,
+          stats: { additions: 8, deletions: 3, filesChanged: 3 },
+          changedFiles: ['src/components/Staged.tsx', 'src/components/Example.tsx', 'src/utils/helper.ts'],
+        };
+      };
 
       // Mock git status with files
       const createMockGitStatus = () => ({
@@ -155,6 +184,35 @@ export const test = base.extend({
         ],
         executions: [],
       });
+
+      const createMockExecutions = () => {
+        const now = new Date();
+        const ts = (offsetMs: number) => new Date(now.getTime() - offsetMs).toISOString();
+        return [
+          {
+            id: 0,
+            commit_message: 'Uncommitted changes',
+            timestamp: ts(10_000),
+            stats_additions: 8,
+            stats_deletions: 3,
+            stats_files_changed: 3,
+            after_commit_hash: '',
+            parent_commit_hash: null,
+            author: 'E2E',
+          },
+          {
+            id: -1,
+            commit_message: 'Base commit',
+            timestamp: ts(20_000),
+            stats_additions: 0,
+            stats_deletions: 0,
+            stats_files_changed: 0,
+            after_commit_hash: 'base1234',
+            parent_commit_hash: null,
+            author: 'E2E',
+          },
+        ];
+      };
 
       // Emit mock event
       const emitEvent = (channel: string, data: any) => {
@@ -325,14 +383,26 @@ export const test = base.extend({
           async getExecutions(sessionId: string) {
             return {
               success: true,
-              data: [],
+              data: createMockExecutions(),
             };
           },
           async getDiff(sessionId: string, target: any) {
             return {
               success: true,
-              data: createMockDiff(),
+              data: createMockDiffResult(target),
             };
+          },
+          async getFileContent(sessionId: string, options: any) {
+            const filePath = typeof options?.filePath === 'string' ? options.filePath : '';
+            const content = [
+              `// mock content for ${filePath || 'unknown'}`,
+              'line 1',
+              'line 2',
+              'line 3',
+              'line 4',
+              'line 5',
+            ].join('\n');
+            return { success: true, data: { content } };
           },
           async getGitCommands(sessionId: string) {
             return {
@@ -342,19 +412,33 @@ export const test = base.extend({
               ],
             };
           },
-          async stageLine(sessionId: string, options: any) {
-            // Emit git status changed
+          async stageHunk(sessionId: string, options: any) {
+            (window as any).__e2e_lastStageHunk = { sessionId, options };
             setTimeout(() => {
-              emitEvent('git:status-changed', {
-                sessionId,
-                status: createMockGitStatus()
-              });
+              emitEvent('git:status-updated', { sessionId, gitStatus: createMockGitStatus() });
             }, 50);
-
-            return {
-              success: true,
-              data: { success: true },
-            };
+            return { success: true, data: { success: true } };
+          },
+          async restoreHunk(sessionId: string, options: any) {
+            (window as any).__e2e_lastRestoreHunk = { sessionId, options };
+            setTimeout(() => {
+              emitEvent('git:status-updated', { sessionId, gitStatus: createMockGitStatus() });
+            }, 50);
+            return { success: true, data: { success: true } };
+          },
+          async changeAllStage(sessionId: string, options: any) {
+            (window as any).__e2e_lastChangeAllStage = { sessionId, options };
+            setTimeout(() => {
+              emitEvent('git:status-updated', { sessionId, gitStatus: createMockGitStatus() });
+            }, 50);
+            return { success: true, data: { success: true } };
+          },
+          async changeFileStage(sessionId: string, options: any) {
+            (window as any).__e2e_lastChangeFileStage = { sessionId, options };
+            setTimeout(() => {
+              emitEvent('git:status-updated', { sessionId, gitStatus: createMockGitStatus() });
+            }, 50);
+            return { success: true, data: { success: true } };
           },
           async sendMessage(sessionId: string, message: string) {
             // Emit message sent event

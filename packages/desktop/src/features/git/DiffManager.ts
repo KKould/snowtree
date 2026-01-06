@@ -190,7 +190,7 @@ export class GitDiffManager {
     const { stdout: trackedDiff } = await this.runGit({
       sessionId,
       cwd: worktreePath,
-      argv: ['git', 'diff', '--color=never', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD'],
+      argv: ['git', 'diff', '--color=never', '--unified=0', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD'],
       timeoutMs: 120_000,
       meta: { source: 'gitDiff', operation: 'diff-working' },
     });
@@ -238,7 +238,7 @@ export class GitDiffManager {
       const { stdout: diff } = await this.runGit({
         sessionId,
         cwd: worktreePath,
-        argv: ['git', 'diff', '--cached', '--color=never', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD'],
+        argv: ['git', 'diff', '--cached', '--color=never', '--unified=0', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD'],
         timeoutMs: 120_000,
         meta: { source: 'gitDiff', operation: 'diff-working-staged' },
       });
@@ -270,7 +270,7 @@ export class GitDiffManager {
       const { stdout: diff } = await this.runGit({
         sessionId,
         cwd: worktreePath,
-        argv: ['git', 'diff', '--color=never', '--src-prefix=a/', '--dst-prefix=b/'],
+        argv: ['git', 'diff', '--color=never', '--unified=0', '--src-prefix=a/', '--dst-prefix=b/'],
         timeoutMs: 120_000,
         meta: { source: 'gitDiff', operation: 'diff-working-unstaged' },
       });
@@ -437,7 +437,7 @@ export class GitDiffManager {
     const { stdout: diff } = await this.runGit({
       sessionId,
       cwd: worktreePath,
-      argv: ['git', 'diff', '--color=never', '--src-prefix=a/', '--dst-prefix=b/', `${fromCommit}..${to}`],
+      argv: ['git', 'diff', '--color=never', '--unified=0', '--src-prefix=a/', '--dst-prefix=b/', `${fromCommit}..${to}`],
       timeoutMs: 120_000,
       meta: { source: 'gitDiff', operation: 'diff-commit', fromCommit, toCommit: to },
     });
@@ -470,7 +470,7 @@ export class GitDiffManager {
     const { stdout: diff } = await this.runGit({
       sessionId,
       cwd: worktreePath,
-      argv: ['git', 'show', '--color=never', '--src-prefix=a/', '--dst-prefix=b/', '--format=', hash],
+      argv: ['git', 'show', '--color=never', '--unified=0', '--src-prefix=a/', '--dst-prefix=b/', '--format=', hash],
       timeoutMs: 120_000,
       meta: { source: 'gitDiff', operation: 'show', commit: hash },
     });

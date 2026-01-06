@@ -106,9 +106,10 @@ interface FileItemProps {
   file: FileChange;
   onClick: () => void;
   isSelected: boolean;
+  testId?: string;
 }
 
-const FileItem: React.FC<FileItemProps> = React.memo(({ file, onClick, isSelected }) => {
+const FileItem: React.FC<FileItemProps> = React.memo(({ file, onClick, isSelected, testId }) => {
   const [isHovered, setIsHovered] = useState(false);
 
   const getTypeInfo = (type: FileChange['type']) => {
@@ -131,6 +132,7 @@ const FileItem: React.FC<FileItemProps> = React.memo(({ file, onClick, isSelecte
   return (
     <button
       type="button"
+      data-testid={testId}
       onClick={onClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -167,6 +169,123 @@ const FileItem: React.FC<FileItemProps> = React.memo(({ file, onClick, isSelecte
 });
 
 FileItem.displayName = 'FileItem';
+
+type TriState = 'checked' | 'indeterminate' | 'unchecked';
+
+const TriStateCheckbox: React.FC<{
+  state: TriState;
+  disabled?: boolean;
+  onToggle: () => void;
+  testId?: string;
+  title?: string;
+}> = React.memo(({ state, disabled, onToggle, testId, title }) => {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!inputRef.current) return;
+    inputRef.current.indeterminate = state === 'indeterminate';
+  }, [state]);
+
+  return (
+    <input
+      ref={inputRef}
+      data-testid={testId}
+      type="checkbox"
+      checked={state === 'checked'}
+      disabled={disabled}
+      title={title}
+      onClick={(e) => e.stopPropagation()}
+      onChange={() => onToggle()}
+      className="st-focus-ring"
+      style={{
+        width: 14,
+        height: 14,
+        accentColor: 'var(--st-accent)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+      }}
+    />
+  );
+});
+
+TriStateCheckbox.displayName = 'TriStateCheckbox';
+
+interface WorkingFileRowProps {
+  file: FileChange;
+  stageState: TriState;
+  onToggleStage: () => void;
+  onClick: () => void;
+  isSelected: boolean;
+  disabled?: boolean;
+  testId?: string;
+}
+
+const WorkingFileRow: React.FC<WorkingFileRowProps> = React.memo(({
+  file,
+  stageState,
+  onToggleStage,
+  onClick,
+  isSelected,
+  disabled,
+  testId,
+}) => {
+  const [isHovered, setIsHovered] = useState(false);
+
+  const getTypeInfo = (type: FileChange['type']) => {
+    switch (type) {
+      case 'added': return { label: 'A', color: colors.text.added, bg: 'rgba(180, 250, 114, 0.15)' };
+      case 'deleted': return { label: 'D', color: colors.text.deleted, bg: 'rgba(255, 130, 114, 0.15)' };
+      case 'renamed': return { label: 'R', color: colors.text.renamed, bg: 'rgba(0, 194, 255, 0.15)' };
+      default: return { label: 'M', color: colors.text.modified, bg: 'rgba(254, 253, 194, 0.15)' };
+    }
+  };
+
+  const typeInfo = getTypeInfo(file.type);
+  const bg = isSelected ? colors.bg.selected : isHovered ? colors.bg.hover : 'transparent';
+
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onClick}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors duration-75"
+      style={{
+        backgroundColor: bg,
+        borderLeft: isSelected ? `2px solid ${colors.accent}` : '2px solid transparent',
+      }}
+    >
+      <TriStateCheckbox
+        state={stageState}
+        disabled={disabled}
+        onToggle={onToggleStage}
+        testId={testId ? `${testId}-checkbox` : undefined}
+        title={stageState === 'checked' ? 'Unstage file' : 'Stage file'}
+      />
+
+      <span
+        className="font-mono text-[10px] font-semibold px-1 rounded"
+        style={{ color: typeInfo.color, backgroundColor: typeInfo.bg }}
+      >
+        {typeInfo.label}
+      </span>
+
+      <span
+        className="truncate min-w-0 flex-1"
+        style={{ color: isSelected || isHovered ? colors.text.primary : colors.text.secondary }}
+      >
+        {file.path}
+      </span>
+
+      <div className="flex items-center gap-1.5 text-[10px] flex-shrink-0 ml-2 font-mono">
+        {file.additions > 0 && <span style={{ color: colors.text.added }}>+{file.additions}</span>}
+        {file.deletions > 0 && <span style={{ color: colors.text.deleted }}>-{file.deletions}</span>}
+      </div>
+    </button>
+  );
+});
+
+WorkingFileRow.displayName = 'WorkingFileRow';
 
 interface CommitItemProps {
   commit: Commit;
@@ -304,88 +423,6 @@ CommitItem.displayName = 'CommitItem';
 
 type WorkingTreeScope = 'all' | 'staged' | 'unstaged' | 'untracked';
 
-const WorkingGroupHeader: React.FC<{
-  scope: 'staged' | 'unstaged' | 'untracked';
-  count: number;
-  additions: number;
-  deletions: number;
-  expanded: boolean;
-  onToggle: () => void;
-}> = ({ scope, count, additions, deletions, expanded, onToggle }) => {
-  // 根据 scope 定义不同的视觉样式
-  const scopeStyles = {
-    staged: {
-      bg: 'rgba(180, 250, 114, 0.08)',  // 淡绿色背景
-      bgHover: 'rgba(180, 250, 114, 0.12)',
-      border: 'rgba(180, 250, 114, 0.3)',
-      text: '#a8e05f',
-      icon: '✓',
-      label: 'STAGED'
-    },
-    unstaged: {
-      bg: 'rgba(254, 253, 194, 0.08)',  // 淡黄色背景
-      bgHover: 'rgba(254, 253, 194, 0.12)',
-      border: 'rgba(254, 253, 194, 0.3)',
-      text: '#e5c07b',
-      icon: '●',
-      label: 'UNSTAGED'
-    },
-    untracked: {
-      bg: 'rgba(171, 178, 191, 0.05)',  // 灰色背景
-      bgHover: 'rgba(171, 178, 191, 0.08)',
-      border: 'rgba(171, 178, 191, 0.2)',
-      text: colors.text.secondary,
-      icon: '?',
-      label: 'UNTRACKED'
-    }
-  };
-
-  const style = scopeStyles[scope];
-  const [isHovered, setIsHovered] = useState(false);
-
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className="w-full flex items-center justify-between px-3 py-2 text-xs transition-all duration-150 st-focus-ring"
-      style={{
-        backgroundColor: isHovered ? style.bgHover : style.bg,
-        borderLeft: `3px solid ${style.border}`,
-        borderBottom: `1px solid ${colors.border}`,
-        marginBottom: 4,
-        cursor: 'pointer'
-      }}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <ChevronDown
-          className={`w-3.5 h-3.5 transition-transform duration-150 ${expanded ? '' : '-rotate-90'}`}
-          style={{ color: style.text }}
-        />
-        <span style={{ fontSize: 12, color: style.text, marginRight: 4 }}>
-          {style.icon}
-        </span>
-        <span className="font-semibold" style={{ fontSize: 11, letterSpacing: '0.5px', color: style.text }}>
-          {style.label}
-        </span>
-        <span
-          className="text-[10px] font-mono px-1.5 py-0.5 rounded font-bold"
-          style={{ backgroundColor: 'rgba(255, 255, 255, 0.1)', color: style.text }}
-        >
-          {count}
-        </span>
-      </div>
-      {(additions > 0 || deletions > 0) && (
-        <div className="flex items-center gap-1.5 text-[11px] font-mono font-semibold">
-          {additions > 0 && <span style={{ color: colors.text.added }}>+{additions}</span>}
-          {deletions > 0 && <span style={{ color: colors.text.deleted }}>-{deletions}</span>}
-        </div>
-      )}
-    </button>
-  );
-};
-
 export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   session,
   onFileClick,
@@ -405,13 +442,9 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   const [selectedIsUncommitted, setSelectedIsUncommitted] = useState(false);
   const [files, setFiles] = useState<FileChange[]>([]);
   const [workingTree, setWorkingTree] = useState<{ staged: FileChange[]; unstaged: FileChange[]; untracked: FileChange[] } | null>(null);
-  const [workingExpanded, setWorkingExpanded] = useState<{ staged: boolean; unstaged: boolean; untracked: boolean }>({
-    staged: true,
-    unstaged: true,
-    untracked: true,
-  });
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshingHistory, setIsRefreshingHistory] = useState(false);
+  const [isStageChanging, setIsStageChanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const loadingRef = useRef(false);
   const requestIdRef = useRef(0);
@@ -628,7 +661,6 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
     setFiles([]);
     setWorkingTree(null);
     setSelectedFileScope(null);
-    setWorkingExpanded({ staged: true, unstaged: true, untracked: true });
     setError(null);
     requestIdRef.current++;
     loadingRef.current = false;
@@ -731,7 +763,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
     onFileClick(file.path, selectedTarget, files);
   }, [onFileClick, selectedTarget, files]);
 
-  const handleWorkingFileClick = useCallback((scope: Exclude<WorkingTreeScope, 'all'>, file: FileChange, groupFiles: FileChange[]) => {
+  const handleWorkingFileClick = useCallback((scope: WorkingTreeScope, file: FileChange, groupFiles: FileChange[]) => {
     setSelectedFile(file.path);
     setSelectedFileScope(scope);
     onFileClick(file.path, { kind: 'working', scope }, groupFiles);
@@ -755,6 +787,80 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
     fetchCommits(false);
     fetchFiles();
   }, [fetchCommits, fetchFiles]);
+
+  const handleChangeAllStage = useCallback(
+    async (stage: boolean) => {
+      if (!session.id || isStageChanging) return;
+      setIsStageChanging(true);
+      try {
+        await API.sessions.changeAllStage(session.id, { stage });
+      } catch (err) {
+        console.error('[RightPanel] Failed to change stage state', err);
+      } finally {
+        setIsStageChanging(false);
+        handleRefresh();
+      }
+    },
+    [handleRefresh, isStageChanging, session.id]
+  );
+
+  const handleChangeFileStage = useCallback(
+    async (filePath: string, stage: boolean) => {
+      if (!session.id || isStageChanging) return;
+      setIsStageChanging(true);
+      try {
+        await API.sessions.changeFileStage(session.id, { filePath, stage });
+      } catch (err) {
+        console.error('[RightPanel] Failed to change file stage state', err);
+      } finally {
+        setIsStageChanging(false);
+        handleRefresh();
+      }
+    },
+    [handleRefresh, isStageChanging, session.id]
+  );
+
+  const trackedFiles = useMemo(() => {
+    if (!workingTree) return [];
+    const map = new Map<string, { staged?: FileChange; unstaged?: FileChange }>();
+    for (const f of workingTree.staged) {
+      map.set(f.path, { ...(map.get(f.path) || {}), staged: f });
+    }
+    for (const f of workingTree.unstaged) {
+      map.set(f.path, { ...(map.get(f.path) || {}), unstaged: f });
+    }
+
+    const merged: Array<{ file: FileChange; stageState: TriState }> = [];
+    for (const [path, entry] of map.entries()) {
+      const staged = entry.staged;
+      const unstaged = entry.unstaged;
+      const type = unstaged?.type ?? staged?.type ?? 'modified';
+      const additions = (staged?.additions || 0) + (unstaged?.additions || 0);
+      const deletions = (staged?.deletions || 0) + (unstaged?.deletions || 0);
+      const stageState: TriState = staged && unstaged ? 'indeterminate' : staged ? 'checked' : 'unchecked';
+      merged.push({ file: { path, type, additions, deletions }, stageState });
+    }
+
+    merged.sort((a, b) => a.file.path.localeCompare(b.file.path));
+    return merged;
+  }, [workingTree]);
+
+  const untrackedFiles = useMemo(() => {
+    if (!workingTree) return [];
+    const list = [...workingTree.untracked];
+    list.sort((a, b) => a.path.localeCompare(b.path));
+    return list;
+  }, [workingTree]);
+
+  const stageAllState: TriState = useMemo(() => {
+    if (!workingTree) return 'unchecked';
+    const hasChanges = workingTree.staged.length + workingTree.unstaged.length + workingTree.untracked.length > 0;
+    if (!hasChanges) return 'unchecked';
+    const allStaged = workingTree.unstaged.length === 0 && workingTree.untracked.length === 0 && workingTree.staged.length > 0;
+    if (allStaged) return 'checked';
+    const someStaged = workingTree.staged.length > 0;
+    return someStaged ? 'indeterminate' : 'unchecked';
+  }, [workingTree]);
 
   const totalCommits = commits.length;
   const totalChanges = selectedIsUncommitted
@@ -958,15 +1064,49 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
               </span>
             )}
           </button>
-          {selectedCommit && (
-            <span
-              className="text-[10px] font-mono truncate max-w-[100px]"
-              style={{ color: selectedCommit.id === 0 ? colors.text.modified : colors.accent }}
-              title={selectedCommit.commit_message}
-            >
-              {selectedCommit.id === 0 ? 'Working Tree' : selectedCommit.after_commit_hash.substring(0, 7)}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {selectedIsUncommitted && totalChanges > 0 && (
+              <div className="flex items-center gap-2">
+                <TriStateCheckbox
+                  state={stageAllState}
+                  disabled={isLoading || isStageChanging}
+                  onToggle={() => {
+                    const hasUnstagedOrUntracked = Boolean((workingTree?.unstaged.length || 0) + (workingTree?.untracked.length || 0));
+                    void handleChangeAllStage(hasUnstagedOrUntracked);
+                  }}
+                  title="Stage/Unstage all changes"
+                  testId="right-panel-stage-all"
+                />
+                <button
+                  type="button"
+                  disabled={isLoading || isStageChanging}
+                  onClick={() => {
+                    const hasUnstagedOrUntracked = Boolean((workingTree?.unstaged.length || 0) + (workingTree?.untracked.length || 0));
+                    void handleChangeAllStage(hasUnstagedOrUntracked);
+                  }}
+                  className="px-2.5 py-1 rounded text-[10px] font-medium transition-all duration-75 st-hoverable st-focus-ring disabled:opacity-40"
+                  style={{
+                    color: colors.text.primary,
+                    backgroundColor: colors.bg.hover,
+                    border: `1px solid ${colors.border}`,
+                  }}
+                  title="Stage/Unstage all changes"
+                >
+                  {((workingTree?.unstaged.length || 0) + (workingTree?.untracked.length || 0)) === 0 ? 'Unstage All' : 'Stage All'}
+                </button>
+              </div>
+            )}
+
+            {selectedCommit && (
+              <span
+                className="text-[10px] font-mono truncate max-w-[100px]"
+                style={{ color: selectedCommit.id === 0 ? colors.text.modified : colors.accent }}
+                title={selectedCommit.commit_message}
+              >
+                {selectedCommit.id === 0 ? 'Working Tree' : selectedCommit.after_commit_hash.substring(0, 7)}
+              </span>
+            )}
+          </div>
         </div>
 
         <div
@@ -1004,53 +1144,59 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
                 {!selectedTarget ? 'Select a commit' : 'Working tree clean'}
               </div>
             ) : (
-              <div className="py-1">
-                {(['staged', 'unstaged', 'untracked'] as const).map((group) => {
-                  const list = workingTree[group];
-                  const additions = list.reduce((sum, f) => sum + (f.additions || 0), 0);
-                  const deletions = list.reduce((sum, f) => sum + (f.deletions || 0), 0);
-                  const expanded = workingExpanded[group];
-                  const toggle = () => setWorkingExpanded((prev) => ({ ...prev, [group]: !prev[group] }));
-
-                  // 定义引导线颜色
-                  const guideColors = {
-                    staged: 'rgba(180, 250, 114, 0.15)',
-                    unstaged: 'rgba(254, 253, 194, 0.15)',
-                    untracked: 'rgba(171, 178, 191, 0.1)'
-                  };
-
-                  return (
-                    <div key={group}>
-                      <WorkingGroupHeader
-                        scope={group}
-                        count={list.length}
-                        additions={additions}
-                        deletions={deletions}
-                        expanded={expanded}
-                        onToggle={toggle}
-                      />
-                      {expanded && list.length > 0 && (
-                        <div
-                          style={{
-                            paddingLeft: 16,
-                            borderLeft: `2px solid ${guideColors[group]}`,
-                            marginLeft: 12,
-                            marginBottom: 8
-                          }}
-                        >
-                          {list.map((file) => (
-                            <FileItem
-                              key={`${group}:${file.path}`}
-                              file={file}
-                              onClick={() => handleWorkingFileClick(group, file, list)}
-                              isSelected={selectedFile === file.path && selectedFileScope === group}
-                            />
-                          ))}
-                        </div>
-                      )}
+              <div className="py-2">
+                {trackedFiles.length > 0 && (
+                  <div className="mb-2">
+                    <div
+                      className="px-3 pb-1 text-[10px] font-semibold tracking-wider uppercase"
+                      style={{ color: colors.text.muted }}
+                    >
+                      Tracked
                     </div>
-                  );
-                })}
+                    <div>
+                      {trackedFiles.map(({ file, stageState }) => (
+                        <WorkingFileRow
+                          key={`tracked:${file.path}`}
+                          file={file}
+                          stageState={stageState}
+                          disabled={isLoading || isStageChanging}
+                          onToggleStage={() => {
+                            const stage = stageState !== 'checked';
+                            void handleChangeFileStage(file.path, stage);
+                          }}
+                          onClick={() => handleWorkingFileClick('all', file, trackedFiles.map((x) => x.file))}
+                          isSelected={selectedFile === file.path && selectedFileScope === 'all'}
+                          testId={`right-panel-file-tracked-${file.path}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {untrackedFiles.length > 0 && (
+                  <div className="mb-2">
+                    <div
+                      className="px-3 pb-1 text-[10px] font-semibold tracking-wider uppercase"
+                      style={{ color: colors.text.muted }}
+                    >
+                      Untracked
+                    </div>
+                    <div>
+                      {untrackedFiles.map((file) => (
+                        <WorkingFileRow
+                          key={`untracked:${file.path}`}
+                          file={file}
+                          stageState="unchecked"
+                          disabled={isLoading || isStageChanging}
+                          onToggleStage={() => void handleChangeFileStage(file.path, true)}
+                          onClick={() => handleWorkingFileClick('untracked', file, untrackedFiles)}
+                          isSelected={selectedFile === file.path && selectedFileScope === 'untracked'}
+                          testId={`right-panel-file-untracked-${file.path}`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )
           ) : files.length === 0 ? (
@@ -1068,6 +1214,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
                   file={file}
                   onClick={() => handleCommitFileClick(file)}
                   isSelected={selectedFile === file.path && selectedFileScope === 'commit'}
+                  testId={`right-panel-file-commit-${file.path}`}
                 />
               ))}
             </div>

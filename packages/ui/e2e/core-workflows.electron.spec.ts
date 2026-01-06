@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { launchElectronApp, closeElectronApp } from './electron-helpers';
 
 test.describe('Core Workflows - Electron Integration', () => {
-  test('full workflow: open repo → view changes → enter visual mode', async () => {
+  test('full workflow: open repo → view changes → open diff overlay', async () => {
     const { app, page } = await launchElectronApp();
 
     const newWorkspaceButton = page.locator('.st-tree-card').first().locator('button[title="New workspace"]');
@@ -12,28 +12,23 @@ test.describe('Core Workflows - Electron Integration', () => {
     const mainLayout = page.locator('[data-testid="main-layout"]');
     await expect(mainLayout).toBeVisible({ timeout: 20000 });
 
-    const changesPanel = page.locator('text=/STAGED|UNSTAGED|Changes/i').first();
+    const changesPanel = page.locator('text=/Tracked|Untracked|Changes/i').first();
     await expect(changesPanel).toBeVisible({ timeout: 5000 });
 
-    const fileItem = page.locator('.file-item, [role="button"]:has-text(".ts")').first();
+    const fileItem = page.locator('[data-testid^="right-panel-file-"], [role="button"]:has-text(".ts")').first();
     if (await fileItem.isVisible({ timeout: 3000 }).catch(() => false)) {
       await fileItem.click();
-      await page.waitForTimeout(500);
+      await expect(page.getByTestId('diff-overlay')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('diff-viewer-zed')).toBeVisible({ timeout: 5000 });
 
-      await page.keyboard.press('v');
-
-      const visualModeBanner = page.locator('text=/Visual Mode/i');
-      const bannerVisible = await visualModeBanner.isVisible({ timeout: 2000 }).catch(() => false);
-
-      expect(bannerVisible).toBe(true);
-
-      await page.keyboard.press('Escape');
+      await page.getByTestId('diff-overlay-back').click();
+      await expect(page.getByTestId('diff-overlay')).toHaveCount(0);
     }
 
     await closeElectronApp(app);
   });
 
-  test('navigation: j/k keys in visual mode', async () => {
+  test('diff overlay shows Zed-style view', async () => {
     const { app, page } = await launchElectronApp();
 
     const newWorkspaceButton = page.locator('.st-tree-card').first().locator('button[title="New workspace"]');
@@ -42,22 +37,13 @@ test.describe('Core Workflows - Electron Integration', () => {
 
     await page.waitForSelector('[data-testid="main-layout"]', { timeout: 15000 });
 
-    const fileItem = page.locator('.file-item, [role="button"]:has-text(".ts")').first();
+    const fileItem = page.locator('[data-testid^="right-panel-file-"], [role="button"]:has-text(".ts")').first();
     if (await fileItem.isVisible({ timeout: 3000 }).catch(() => false)) {
       await fileItem.click();
-      await page.waitForTimeout(500);
+      await expect(page.getByTestId('diff-overlay')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('diff-viewer-zed')).toBeVisible({ timeout: 5000 });
 
-      await page.keyboard.press('v');
-
-      const visualModeBanner = page.locator('text=/Visual Mode/i');
-      if (await visualModeBanner.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await page.keyboard.press('j');
-        await page.waitForTimeout(200);
-        await page.keyboard.press('k');
-        await page.waitForTimeout(200);
-
-        expect(true).toBe(true);
-      }
+      await page.getByTestId('diff-overlay-back').click();
     }
 
     await closeElectronApp(app);

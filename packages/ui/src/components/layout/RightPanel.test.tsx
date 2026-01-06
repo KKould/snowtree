@@ -10,11 +10,13 @@ vi.mock('../../utils/api', () => ({
     sessions: {
       getExecutions: vi.fn(),
       getDiff: vi.fn(),
+      changeAllStage: vi.fn(),
+      changeFileStage: vi.fn(),
     },
   },
 }));
 
-describe('RightPanel - WorkingGroupHeader', () => {
+describe('RightPanel - Zed-style Changes list', () => {
   const mockProps: RightPanelProps = {
     session: {
       id: 'test-session',
@@ -38,7 +40,7 @@ describe('RightPanel - WorkingGroupHeader', () => {
       data: [
         {
           id: 0,
-          commit_message: 'Working Tree',
+          commit_message: 'Uncommitted changes',
           timestamp: new Date().toISOString(),
           stats_additions: 0,
           stats_deletions: 0,
@@ -54,18 +56,19 @@ describe('RightPanel - WorkingGroupHeader', () => {
       data: {
         workingTree: {
           staged: [
-            { path: 'staged1.ts', status: 'M', additions: 5, deletions: 2 },
-            { path: 'staged2.ts', status: 'A', additions: 10, deletions: 0 },
+            { path: 'staged1.ts', type: 'modified', additions: 5, deletions: 2 },
           ],
           unstaged: [
-            { path: 'unstaged1.ts', status: 'M', additions: 3, deletions: 1 },
+            { path: 'unstaged1.ts', type: 'modified', additions: 3, deletions: 1 },
           ],
           untracked: [
-            { path: 'new.ts', status: '?', additions: 0, deletions: 0 },
+            { path: 'new.ts', type: 'added', additions: 10, deletions: 0 },
           ],
         },
       },
     });
+    (API.sessions.changeAllStage as any).mockResolvedValue({ success: true });
+    (API.sessions.changeFileStage as any).mockResolvedValue({ success: true });
   });
 
   it('renders without crashing', async () => {
@@ -76,132 +79,56 @@ describe('RightPanel - WorkingGroupHeader', () => {
     });
   });
 
-  it('does NOT crash with colors.diff.added bug', async () => {
-    // This ensures the fix - should use colors.text.added/deleted, not colors.diff.added
-    expect(() => render(<RightPanel {...mockProps} />)).not.toThrow();
-
-    await waitFor(() => {
-      expect(screen.getByText(/^STAGED$/i)).toBeInTheDocument();
-    });
-  });
-
-  it('displays all three group headers with correct labels', async () => {
+  it('shows Tracked and Untracked sections', async () => {
     render(<RightPanel {...mockProps} />);
 
     await waitFor(() => {
-      expect(screen.getByText(/^STAGED$/i)).toBeInTheDocument();
-      expect(screen.getByText(/^UNSTAGED$/i)).toBeInTheDocument();
-      expect(screen.getByText(/^UNTRACKED$/i)).toBeInTheDocument();
+      expect(screen.getByText(/^Tracked$/i)).toBeInTheDocument();
+      expect(screen.getByText(/^Untracked$/i)).toBeInTheDocument();
     });
   });
 
-  it('shows correct icons for each group', async () => {
-    const { container } = render(<RightPanel {...mockProps} />);
+  it('renders per-file tri-state checkboxes', async () => {
+    render(<RightPanel {...mockProps} />);
 
     await waitFor(() => {
-      const text = container.textContent || '';
-      expect(text).toContain('✓'); // Staged icon
-      expect(text).toContain('●'); // Unstaged icon
-      expect(text).toContain('?'); // Untracked icon
+      expect(screen.getByTestId('right-panel-file-tracked-staged1.ts-checkbox')).toBeInTheDocument();
+    });
+
+    const staged = screen.getByTestId('right-panel-file-tracked-staged1.ts-checkbox') as HTMLInputElement;
+    const unstaged = screen.getByTestId('right-panel-file-tracked-unstaged1.ts-checkbox') as HTMLInputElement;
+    const untracked = screen.getByTestId('right-panel-file-untracked-new.ts-checkbox') as HTMLInputElement;
+
+    expect(staged.checked).toBe(true);
+    expect(unstaged.checked).toBe(false);
+    expect(untracked.checked).toBe(false);
+  });
+
+  it('stages/unstages a file via checkbox', async () => {
+    render(<RightPanel {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('right-panel-file-tracked-unstaged1.ts-checkbox')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('right-panel-file-tracked-unstaged1.ts-checkbox'));
+
+    await waitFor(() => {
+      expect(API.sessions.changeFileStage).toHaveBeenCalledWith('test-session', { filePath: 'unstaged1.ts', stage: true });
     });
   });
 
-  it('displays file counts correctly', async () => {
-    const { container } = render(<RightPanel {...mockProps} />);
+  it('stages/unstages all via header controls', async () => {
+    render(<RightPanel {...mockProps} />);
 
     await waitFor(() => {
-      const text = container.textContent || '';
-      expect(text).toMatch(/2/); // 2 staged files
-      expect(text).toMatch(/1/); // 1 unstaged file
-      expect(text).toMatch(/1/); // 1 untracked file
-    });
-  });
-
-  it('shows addition/deletion stats with correct colors', async () => {
-    const { container } = render(<RightPanel {...mockProps} />);
-
-    await waitFor(() => {
-      // Should show +15 for staged (5+10)
-      expect(screen.getByText(/^\+15$/)).toBeInTheDocument();
-      // Should show -2 for staged
-      expect(screen.getAllByText(/^-2$/).length).toBeGreaterThan(0);
-      // Should show +3 for unstaged
-      expect(screen.getAllByText(/^\+3$/).length).toBeGreaterThan(0);
+      expect(screen.getByTestId('right-panel-stage-all')).toBeInTheDocument();
     });
 
-    // Check that stats use colors.text.added and colors.text.deleted
-    const addedStats = container.querySelectorAll('span[style*="color"]');
-    expect(addedStats.length).toBeGreaterThan(0);
-  });
-
-  it('applies different background colors for each group', async () => {
-    const { container } = render(<RightPanel {...mockProps} />);
+    fireEvent.click(screen.getByTestId('right-panel-stage-all'));
 
     await waitFor(() => {
-      const buttons = container.querySelectorAll('button');
-      const stagedBtn = Array.from(buttons).find(btn => btn.textContent?.includes('STAGED'));
-      const unstagedBtn = Array.from(buttons).find(btn => btn.textContent?.includes('UNSTAGED'));
-      const untrackedBtn = Array.from(buttons).find(btn => btn.textContent?.includes('UNTRACKED'));
-
-      expect(stagedBtn).toBeTruthy();
-      expect(unstagedBtn).toBeTruthy();
-      expect(untrackedBtn).toBeTruthy();
-
-      // Each should have different background color
-      const stagedStyle = stagedBtn ? window.getComputedStyle(stagedBtn) : null;
-      const unstagedStyle = unstagedBtn ? window.getComputedStyle(unstagedBtn) : null;
-
-      expect(stagedStyle?.backgroundColor).toBeTruthy();
-      expect(unstagedStyle?.backgroundColor).toBeTruthy();
-      expect(stagedStyle?.backgroundColor).not.toBe(unstagedStyle?.backgroundColor);
-    });
-  });
-
-  it('toggles group expansion on click', async () => {
-    const { container } = render(<RightPanel {...mockProps} />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/^STAGED$/i)).toBeInTheDocument();
-    });
-
-    const buttons = container.querySelectorAll('button');
-    const stagedBtn = Array.from(buttons).find(btn => btn.textContent?.includes('STAGED'));
-
-    if (stagedBtn) {
-      const chevron = stagedBtn.querySelector('svg');
-      const initialCollapsed = chevron?.classList.contains('-rotate-90') ?? false;
-
-      // Click to collapse
-      fireEvent.click(stagedBtn);
-
-      await waitFor(() => {
-        const newCollapsed = chevron?.classList.contains('-rotate-90') ?? false;
-        expect(newCollapsed).not.toBe(initialCollapsed);
-      });
-    }
-  });
-
-  it('shows guide lines for file lists', async () => {
-    const { container } = render(<RightPanel {...mockProps} />);
-
-    await waitFor(() => {
-      // File lists should have left border (guide line)
-      const guidedLists = container.querySelectorAll('div[style*="margin-left: 12px"][style*="border-left"]');
-      expect(guidedLists.length).toBeGreaterThan(0);
-    });
-  });
-
-  it('applies correct border colors matching group theme', async () => {
-    const { container } = render(<RightPanel {...mockProps} />);
-
-    await waitFor(() => {
-      const stagedBtn = Array.from(container.querySelectorAll('button')).find(btn =>
-        btn.textContent?.includes('STAGED')
-      );
-
-      // Button should have themed left border
-      const borderLeft = stagedBtn ? window.getComputedStyle(stagedBtn).borderLeftWidth : '';
-      expect(borderLeft).toBe('3px');
+      expect(API.sessions.changeAllStage).toHaveBeenCalledWith('test-session', { stage: true });
     });
   });
 

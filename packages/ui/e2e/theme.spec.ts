@@ -98,7 +98,7 @@ test.describe('Theme and Appearance', () => {
 
         const components = [
           page.locator('[data-testid="main-layout"]'),
-          page.locator('.file-item').first(),
+          page.locator('[data-testid^="right-panel-file-"]').first(),
           page.locator('textarea, [contenteditable="true"]').first(),
         ];
 
@@ -140,7 +140,7 @@ test.describe('Theme and Appearance', () => {
         await firstWorktree.click();
         await page.waitForTimeout(1000);
 
-        const fileItem = page.locator('.file-item').first();
+        const fileItem = page.locator('[data-testid^="right-panel-file-"]').first();
         if (await fileItem.isVisible({ timeout: 5000 }).catch(() => false)) {
           await fileItem.click();
           await page.waitForTimeout(500);
@@ -155,7 +155,10 @@ test.describe('Theme and Appearance', () => {
             expect(color).toBeTruthy();
           }
 
-          await page.keyboard.press('Escape');
+          const back = page.getByTestId('diff-overlay-back');
+          if (await back.isVisible({ timeout: 2000 }).catch(() => false)) {
+            await back.click();
+          }
         }
       }
     }
@@ -181,17 +184,20 @@ test.describe('Theme and Appearance', () => {
         await firstWorktree.click();
         await page.waitForTimeout(1000);
 
-        const fileItem = page.locator('.file-item').first();
+        const fileItem = page.locator('[data-testid^="right-panel-file-"]').first();
         if (await fileItem.isVisible({ timeout: 5000 }).catch(() => false)) {
           await fileItem.click();
           await page.waitForTimeout(500);
 
-          const overlay = page.locator('[role="dialog"], .diff-overlay').first();
+          const overlay = page.getByTestId('diff-overlay');
           if (await overlay.isVisible({ timeout: 2000 }).catch(() => false)) {
             const overlayBg = await overlay.evaluate(el => window.getComputedStyle(el).backgroundColor);
             expect(overlayBg).toBeTruthy();
 
-            await page.keyboard.press('Escape');
+            const back = page.getByTestId('diff-overlay-back');
+            if (await back.isVisible({ timeout: 2000 }).catch(() => false)) {
+              await back.click();
+            }
           }
         }
       }

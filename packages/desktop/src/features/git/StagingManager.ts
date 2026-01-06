@@ -34,6 +34,35 @@ export interface StageLinesOptions {
   targetLine: TargetLine;
 }
 
+export interface StageHunkOptions {
+  worktreePath: string;
+  sessionId: string;
+  filePath: string;
+  isStaging: boolean;
+  hunkHeader: string;
+}
+
+export interface RestoreHunkOptions {
+  worktreePath: string;
+  sessionId: string;
+  filePath: string;
+  scope: 'staged' | 'unstaged';
+  hunkHeader: string;
+}
+
+export interface ChangeAllStageOptions {
+  worktreePath: string;
+  sessionId: string;
+  stage: boolean;
+}
+
+export interface ChangeFileStageOptions {
+  worktreePath: string;
+  sessionId: string;
+  filePath: string;
+  stage: boolean;
+}
+
 export interface StageLinesResult {
   success: boolean;
   error?: string;
@@ -117,6 +146,162 @@ export class GitStagingManager {
   }
 
   /**
+   * Stage or unstage a full hunk (block)
+   */
+  async stageHunk(options: StageHunkOptions): Promise<StageLinesResult> {
+    try {
+      const scope = options.isStaging ? 'unstaged' : 'staged';
+      const fullDiff = await this.getFileDiff(options.worktreePath, options.filePath, scope, options.sessionId);
+
+      if (fullDiff.includes('Binary files differ')) {
+        return { success: false, error: 'Cannot stage hunks of binary files' };
+      }
+
+      const hunks = this.parseDiffIntoHunks(fullDiff);
+      if (hunks.length === 0) {
+        return { success: false, error: 'No changes found in diff' };
+      }
+
+      const normalizedHeader = options.hunkHeader.trim();
+      const targetHunk = hunks.find((h) => h.header.trim() === normalizedHeader);
+      if (!targetHunk) {
+        return { success: false, error: 'Target hunk not found in diff' };
+      }
+
+      const patch = this.generateHunkPatch(targetHunk, options.filePath);
+      return await this.applyPatch(options.worktreePath, patch, options.isStaging, options.sessionId, {
+        operation: options.isStaging ? 'stage-hunk' : 'unstage-hunk',
+      });
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  }
+
+  /**
+   * Restore (discard) a specific hunk in the working tree.
+   *
+   * For staged hunks we first unstage the hunk, then attempt to restore the same patch in
+   * the working tree (best-effort; may fail if the working tree differs from the index).
+   */
+  async restoreHunk(options: RestoreHunkOptions): Promise<StageLinesResult> {
+    try {
+      const fullDiffScope = options.scope === 'staged' ? 'staged' : 'unstaged';
+      const fullDiff = await this.getFileDiff(options.worktreePath, options.filePath, fullDiffScope, options.sessionId);
+
+      if (fullDiff.includes('Binary files differ')) {
+        return { success: false, error: 'Cannot restore hunks of binary files' };
+      }
+
+      const hunks = this.parseDiffIntoHunks(fullDiff);
+      if (hunks.length === 0) {
+        return { success: false, error: 'No changes found in diff' };
+      }
+
+      const normalizedHeader = options.hunkHeader.trim();
+      const targetHunk = hunks.find((h) => h.header.trim() === normalizedHeader);
+      if (!targetHunk) {
+        return { success: false, error: 'Target hunk not found in diff' };
+      }
+
+      const patch = this.generateHunkPatch(targetHunk, options.filePath);
+
+      if (options.scope === 'staged') {
+        const unstage = await this.applyPatch(options.worktreePath, patch, false, options.sessionId, {
+          operation: 'restore-hunk-unstage',
+        });
+        if (!unstage.success) return unstage;
+      }
+
+      const worktreeRestore = await this.applyWorktreePatch(options.worktreePath, patch, true, options.sessionId, {
+        operation: 'restore-hunk-worktree',
+      });
+      if (!worktreeRestore.success) {
+        return worktreeRestore;
+      }
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  }
+
+  /**
+   * Stage or unstage all changes.
+   */
+  async changeAllStage(options: ChangeAllStageOptions): Promise<StageLinesResult> {
+    try {
+      const argv = options.stage
+        ? ['git', 'add', '--all']
+        : ['git', 'reset'];
+
+      const result = await this.gitExecutor.run({
+        sessionId: options.sessionId,
+        cwd: options.worktreePath,
+        argv,
+        op: 'write',
+        recordTimeline: true,
+        meta: { source: 'gitStaging', operation: options.stage ? 'stage-all' : 'unstage-all' },
+      });
+
+      if (result.exitCode !== 0) {
+        return { success: false, error: result.stderr || 'git command failed' };
+      }
+
+      this.statusManager.clearSessionCache(options.sessionId);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  }
+
+  /**
+   * Stage or unstage a single file.
+   *
+   * - Stage: `git add --all -- <file>`
+   * - Unstage: `git reset -- <file>`
+   */
+  async changeFileStage(options: ChangeFileStageOptions): Promise<StageLinesResult> {
+    try {
+      const filePath = options.filePath.trim();
+      if (!filePath) return { success: false, error: 'File path is required' };
+
+      const argv = options.stage
+        ? ['git', 'add', '--all', '--', filePath]
+        : ['git', 'reset', '--', filePath];
+
+      const result = await this.gitExecutor.run({
+        sessionId: options.sessionId,
+        cwd: options.worktreePath,
+        argv,
+        op: 'write',
+        recordTimeline: true,
+        meta: { source: 'gitStaging', operation: options.stage ? 'stage-file' : 'unstage-file', filePath },
+      });
+
+      if (result.exitCode !== 0) {
+        return { success: false, error: result.stderr || 'git command failed' };
+      }
+
+      this.statusManager.clearSessionCache(options.sessionId);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  }
+
+  /**
    * Get diff for a specific file and scope
    */
   private async getFileDiff(
@@ -127,8 +312,8 @@ export class GitStagingManager {
   ): Promise<string> {
     const argv =
       scope === 'staged'
-        ? ['git', 'diff', '--cached', '--color=never', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD', '--', filePath]
-        : ['git', 'diff', '--color=never', '--src-prefix=a/', '--dst-prefix=b/', '--', filePath];
+        ? ['git', 'diff', '--cached', '--color=never', '--unified=0', '--src-prefix=a/', '--dst-prefix=b/', 'HEAD', '--', filePath]
+        : ['git', 'diff', '--color=never', '--unified=0', '--src-prefix=a/', '--dst-prefix=b/', '--', filePath];
 
     const result = await this.gitExecutor.run({
       sessionId,
@@ -336,6 +521,63 @@ export class GitStagingManager {
     return patch;
   }
 
+  private generateHunkPatch(hunk: Hunk, filePath: string): string {
+    const patch = [
+      `diff --git a/${filePath} b/${filePath}`,
+      `--- a/${filePath}`,
+      `+++ b/${filePath}`,
+      hunk.header,
+      ...hunk.lines.map((l) => l.text),
+      '',
+    ].join('\n');
+
+    return patch;
+  }
+
+  /**
+   * Apply patch to working tree using git apply (not --cached).
+   */
+  private async applyWorktreePatch(
+    worktreePath: string,
+    patch: string,
+    reverse: boolean,
+    sessionId: string,
+    meta?: { operation: string }
+  ): Promise<StageLinesResult> {
+    const tempFile = path.join(os.tmpdir(), `snowtree-worktree-patch-${Date.now()}.patch`);
+
+    try {
+      await fs.writeFile(tempFile, patch, 'utf8');
+
+      const argv = [
+        'git',
+        'apply',
+        '--unidiff-zero',
+        '--whitespace=nowarn',
+        ...(reverse ? ['-R'] : []),
+        tempFile,
+      ];
+
+      const result = await this.gitExecutor.run({
+        sessionId,
+        cwd: worktreePath,
+        argv,
+        op: 'write',
+        recordTimeline: true,
+        meta: { source: 'gitStaging', operation: meta?.operation ?? (reverse ? 'apply-reverse' : 'apply') },
+      });
+
+      if (result.exitCode !== 0) {
+        return { success: false, error: result.stderr || 'git apply failed' };
+      }
+
+      this.statusManager.clearSessionCache(sessionId);
+      return { success: true };
+    } finally {
+      await fs.unlink(tempFile).catch(() => {});
+    }
+  }
+
   /**
    * Apply patch using git apply --cached
    */
@@ -343,7 +585,8 @@ export class GitStagingManager {
     worktreePath: string,
     patch: string,
     isStaging: boolean,
-    sessionId: string
+    sessionId: string,
+    meta?: { operation: string }
   ): Promise<StageLinesResult> {
     // Write patch to temp file
     const tempFile = path.join(os.tmpdir(), `snowtree-patch-${Date.now()}.patch`);
@@ -370,7 +613,7 @@ export class GitStagingManager {
         recordTimeline: true,
         meta: {
           source: 'gitStaging',
-          operation: isStaging ? 'stage-line' : 'unstage-line',
+          operation: meta?.operation ?? (isStaging ? 'stage-line' : 'unstage-line'),
         },
       });
 

@@ -95,15 +95,19 @@ export interface ElectronAPI {
     getExecutions: (sessionId: string) => Promise<IPCResponse<ExecutionDTO[]>>;
     getDiff: (sessionId: string, target: DiffTarget) => Promise<IPCResponse<GitDiffResultDTO>>;
     getGitCommands: (sessionId: string) => Promise<IPCResponse<{ currentBranch: string }>>;
-    stageLine: (sessionId: string, options: {
+    getFileContent: (sessionId: string, options: { filePath: string; ref: 'HEAD' | 'INDEX' | 'WORKTREE'; maxBytes?: number }) => Promise<IPCResponse<{ content: string }>>;
+    stageHunk: (sessionId: string, options: {
       filePath: string;
       isStaging: boolean;
-      targetLine: {
-        type: 'added' | 'deleted';
-        oldLineNumber: number | null;
-        newLineNumber: number | null;
-      };
+      hunkHeader: string;
     }) => Promise<IPCResponse<{ success: boolean; error?: string }>>;
+    restoreHunk: (sessionId: string, options: {
+      filePath: string;
+      scope: 'staged' | 'unstaged';
+      hunkHeader: string;
+    }) => Promise<IPCResponse<{ success: boolean; error?: string }>>;
+    changeAllStage: (sessionId: string, options: { stage: boolean }) => Promise<IPCResponse<{ success: boolean; error?: string }>>;
+    changeFileStage: (sessionId: string, options: { filePath: string; stage: boolean }) => Promise<IPCResponse<{ success: boolean; error?: string }>>;
   };
 
   panels: {

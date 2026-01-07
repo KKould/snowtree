@@ -215,4 +215,16 @@ index 0000000..abcdefg
     expect(css).toContain('st-hunk-status--staged');
     expect(css).toContain('Zed-like: staged_hollow -> staged has border');
   });
+
+  it('shows a persistent staged badge for staged hunks', () => {
+    render(
+      <ZedDiffViewer
+        diff={SAMPLE_DIFF_TWO_HUNKS}
+        sessionId="s1"
+        currentScope="staged"
+        stagedDiff={SAMPLE_DIFF_TWO_HUNKS}
+      />
+    );
+    expect(screen.getAllByLabelText('Hunk staged').length).toBeGreaterThan(0);
+  });
 });

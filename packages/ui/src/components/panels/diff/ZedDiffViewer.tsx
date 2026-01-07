@@ -378,12 +378,12 @@ export const ZedDiffViewer: React.FC<{
 
                     const element = (
                       <div data-testid="diff-hunk-controls" className={`st-diff-hunk-actions-anchor ${statusClass} ${kindClass}`}>
+                        {hunkStatus === 'staged' && (
+                          <div className="st-hunk-staged-badge" aria-label="Hunk staged">
+                            staged
+                          </div>
+                        )}
                         <div className="st-diff-hunk-actions">
-                          {hunkStatus === 'staged' && (
-                            <span className="st-hunk-badge" aria-label="Hunk staged">
-                              staged
-                            </span>
-                          )}
                           <button
                             type="button"
                             data-testid="diff-hunk-stage"
@@ -580,7 +580,13 @@ export const ZedDiffViewer: React.FC<{
             pointer-events: auto;
           }
 
-          .st-diff-table .st-hunk-badge {
+          /* Persistent staged badge (not hover-only). */
+          .st-diff-table .st-hunk-staged-badge {
+            position: absolute;
+            left: 14px;
+            top: 8px;
+            z-index: 3;
+            pointer-events: none;
             font-size: 10px;
             line-height: 1;
             padding: 3px 6px;
@@ -591,6 +597,8 @@ export const ZedDiffViewer: React.FC<{
             text-transform: uppercase;
             letter-spacing: 0.02em;
           }
+          /* Avoid badge overlapping the hover actions bubble. */
+          .st-diff-table .diff-hunk:hover .st-hunk-staged-badge { opacity: 0; }
 
           .st-diff-hunk-btn {
             font-size: 12px;
@@ -612,8 +620,8 @@ export const ZedDiffViewer: React.FC<{
 
           /* Clearer line numbers: avoid default link color. */
           .st-diff-table .diff-gutter { background: color-mix(in srgb, var(--st-surface) 78%, transparent); }
-          .st-diff-table .diff-gutter > a { color: color-mix(in srgb, var(--st-text-muted) 92%, transparent); }
-          .st-diff-table .diff-gutter:hover > a { color: var(--st-text-muted); }
+          .st-diff-table .diff-gutter > a { color: var(--st-text-muted); font-weight: 500; }
+          .st-diff-table .diff-gutter:hover > a { color: var(--st-text); }
         `}
       </style>
     </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { X, ArrowLeft, RefreshCw, Copy, Check } from 'lucide-react';
 import { ZedDiffViewer } from '../panels/diff/ZedDiffViewer';
 import { API } from '../../utils/api';
@@ -47,6 +47,7 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const overlayRefreshTimerRef = useRef<number | null>(null);
 
   const derivedFiles = useMemo(() => {
     if (!diff) return [];
@@ -225,6 +226,29 @@ export const DiffOverlay: React.FC<DiffOverlayProps> = React.memo(({
       console.error('Failed to copy path:', err);
     }
   }, [filePath]);
+
+  // Keep overlay in sync with staging actions triggered outside the overlay (e.g. Stage/Unstage All in RightPanel).
+  useEffect(() => {
+    if (!isOpen || !sessionId || !target) return;
+    if (target.kind !== 'working' || !filePath) return;
+    const unsub = window.electronAPI?.events?.onGitStatusUpdated?.((data) => {
+      if (!data || data.sessionId !== sessionId) return;
+      if (overlayRefreshTimerRef.current) {
+        window.clearTimeout(overlayRefreshTimerRef.current);
+      }
+      overlayRefreshTimerRef.current = window.setTimeout(() => {
+        overlayRefreshTimerRef.current = null;
+        void handleRefresh();
+      }, 80);
+    });
+    return () => {
+      if (overlayRefreshTimerRef.current) {
+        window.clearTimeout(overlayRefreshTimerRef.current);
+        overlayRefreshTimerRef.current = null;
+      }
+      if (unsub) unsub();
+    };
+  }, [isOpen, sessionId, target, filePath, handleRefresh]);
 
   if (!isOpen) return null;
 

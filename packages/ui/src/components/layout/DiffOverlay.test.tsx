@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { render, waitFor, act } from '@testing-library/react';
 import { DiffOverlay } from './DiffOverlay';
 import { API } from '../../utils/api';
 
@@ -17,6 +17,12 @@ describe('DiffOverlay', () => {
     vi.clearAllMocks();
     (API.sessions.getDiff as any).mockResolvedValue({ success: true, data: { diff: '' } });
     (API.sessions.getFileContent as any).mockResolvedValue({ success: true, data: { content: 'a\nb\nc' } });
+
+    (window as any).electronAPI = {
+      events: {
+        onGitStatusUpdated: vi.fn(),
+      },
+    };
   });
 
   it('reloads when filePath changes while open', async () => {
@@ -41,5 +47,38 @@ describe('DiffOverlay', () => {
       expect(API.sessions.getFileContent).toHaveBeenCalledWith('s1', expect.objectContaining({ filePath: 'b.txt' }));
     });
   });
-});
 
+  it('refreshes when git status updates while open', async () => {
+    const onGitStatusUpdated = (window as any).electronAPI.events.onGitStatusUpdated as any;
+    let cb: ((data: any) => void) | null = null;
+    onGitStatusUpdated.mockImplementation((fn: any) => {
+      cb = fn;
+      return () => {};
+    });
+
+    render(
+      <DiffOverlay
+        isOpen={true}
+        sessionId="s1"
+        filePath="a.txt"
+        target={{ kind: 'working', scope: 'all' } as any}
+        onClose={vi.fn()}
+        files={[]}
+      />
+    );
+
+    await waitFor(() => {
+      expect(onGitStatusUpdated).toHaveBeenCalled();
+    });
+
+    const callsBefore = (API.sessions.getDiff as any).mock.calls.length;
+    await act(async () => {
+      cb?.({ sessionId: 's1', gitStatus: { state: 'modified' } });
+      await new Promise((r) => setTimeout(r, 120));
+    });
+
+    await waitFor(() => {
+      expect((API.sessions.getDiff as any).mock.calls.length).toBeGreaterThan(callsBefore);
+    });
+  });
+});

@@ -93,6 +93,31 @@ StackConnector.displayName = 'StackConnector';
 // Zed/Git-like ordering: locale-independent, matches git path sorting.
 const compareGitPaths = (a: string, b: string) => (a === b ? 0 : a < b ? -1 : 1);
 
+const toEpochMs = (timestamp: string) => {
+  const t = Date.parse(timestamp);
+  return Number.isFinite(t) ? t : 0;
+};
+
+const orderCommitsNewestFirst = (items: Commit[]) => {
+  const uncommitted = items.filter((c) => c.id === 0);
+  const base = items.filter((c) => c.id === -1);
+  const others = items.filter((c) => c.id !== 0 && c.id !== -1);
+
+  const sessionCommits = others.filter((c) => c.id > 0);
+  const rest = others.filter((c) => c.id <= 0);
+
+  sessionCommits.sort((a, b) => {
+    const dt = toEpochMs(b.timestamp) - toEpochMs(a.timestamp);
+    if (dt !== 0) return dt;
+    const ha = a.after_commit_hash || '';
+    const hb = b.after_commit_hash || '';
+    return ha === hb ? 0 : ha < hb ? 1 : -1;
+  });
+
+  // Keep "Working Tree" first and "BASE" last.
+  return [...uncommitted, ...sessionCommits, ...rest, ...base];
+};
+
 interface Commit {
   id: number;
   commit_message: string;
@@ -481,7 +506,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
 
       if (response.success && response.data) {
         setError(null);
-        const next = response.data as Commit[];
+        const next = orderCommitsNewestFirst(response.data as Commit[]);
         setCommits(next);
 
         const hasUncommitted = next.some((c) => c.id === 0);

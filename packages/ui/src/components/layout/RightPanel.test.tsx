@@ -246,4 +246,74 @@ describe('RightPanel - Zed-style Changes list', () => {
       'right-panel-file-untracked-dd.txt',
     ]);
   });
+
+  it('orders commits newest-first (working tree first, base last)', async () => {
+    (API.sessions.getExecutions as any).mockResolvedValue({
+      success: true,
+      data: [
+        {
+          id: 0,
+          commit_message: 'Uncommitted changes',
+          timestamp: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+          stats_additions: 0,
+          stats_deletions: 0,
+          stats_files_changed: 0,
+          after_commit_hash: '',
+          parent_commit_hash: null,
+          author: 'test',
+        },
+        {
+          id: 1,
+          commit_message: 'older commit',
+          timestamp: new Date('2026-01-01T00:00:01.000Z').toISOString(),
+          stats_additions: 1,
+          stats_deletions: 1,
+          stats_files_changed: 1,
+          after_commit_hash: '1111111111111111111111111111111111111111',
+          parent_commit_hash: null,
+          author: 'test',
+        },
+        {
+          id: 2,
+          commit_message: 'newer commit',
+          timestamp: new Date('2026-01-01T00:00:02.000Z').toISOString(),
+          stats_additions: 2,
+          stats_deletions: 0,
+          stats_files_changed: 1,
+          after_commit_hash: '2222222222222222222222222222222222222222',
+          parent_commit_hash: null,
+          author: 'test',
+        },
+        {
+          id: -1,
+          commit_message: 'base',
+          timestamp: new Date('2025-12-31T23:59:59.000Z').toISOString(),
+          stats_additions: 0,
+          stats_deletions: 0,
+          stats_files_changed: 0,
+          after_commit_hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          parent_commit_hash: null,
+          author: 'test',
+        },
+      ],
+    });
+
+    const { container } = render(<RightPanel {...mockProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Commits/i)).toBeInTheDocument();
+      expect(screen.getByLabelText('Select commit uncommitted changes')).toBeInTheDocument();
+    });
+
+    const selectButtons = Array.from(container.querySelectorAll('button[aria-label^="Select commit"]'));
+    const labels = selectButtons.map((el) => el.getAttribute('aria-label'));
+
+    expect(labels[0]).toBe('Select commit uncommitted changes');
+    expect(labels[1]).toBe('Select commit 2222222');
+    expect(labels[2]).toBe('Select commit 1111111');
+    expect(labels[3]).toBe('Select commit bbbbbbb');
+    const commitTexts = container.textContent || '';
+    expect(commitTexts.indexOf('newer commit')).toBeLessThan(commitTexts.indexOf('older commit'));
+    expect(commitTexts.indexOf('older commit')).toBeLessThan(commitTexts.indexOf('base'));
+  });
 });

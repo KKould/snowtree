@@ -243,6 +243,25 @@ export const ZedDiffViewer: React.FC<{
     [sessionId, onChanged, setPending]
   );
 
+  const restoreHunk = useCallback(
+    async (filePath: string, scope: 'staged' | 'unstaged', hunkHeader: string, hunkKey: string) => {
+      if (!sessionId) return;
+      try {
+        setPending(hunkKey, true);
+        await API.sessions.restoreHunk(sessionId, { filePath, scope, hunkHeader });
+        onChanged?.();
+      } catch (err) {
+        console.error('[Diff] Failed to restore hunk', { filePath, hunkHeader, err });
+      } finally {
+        setPending(hunkKey, false);
+        if (document.activeElement instanceof HTMLElement) {
+          document.activeElement.blur();
+        }
+      }
+    },
+    [sessionId, onChanged, setPending]
+  );
+
   const stageFile = useCallback(
     async (filePath: string, stage: boolean, hunkKey: string) => {
       if (!sessionId) return;
@@ -339,7 +358,9 @@ export const ZedDiffViewer: React.FC<{
 
                     const stageLabel = hunkStatus === 'staged' ? 'Unstage' : 'Stage';
                     const canStageOrUnstage = Boolean(sessionId && hunkStatus !== 'unknown');
+                    const canRestore = Boolean(sessionId && (hunkStatus === 'staged' || hunkStatus === 'unstaged'));
                     const stageHeader = hunkStatus === 'staged' ? stagedHeader! : hunkStatus === 'unstaged' ? unstagedHeader! : null;
+                    const restoreScope: 'staged' | 'unstaged' = hunkStatus === 'staged' ? 'staged' : 'unstaged';
                     const statusClass =
                       hunkStatus === 'staged'
                         ? 'st-hunk-status--staged'
@@ -378,6 +399,22 @@ export const ZedDiffViewer: React.FC<{
                           >
                             {isPending ? '…' : stageLabel}
                           </button>
+                          {(hunkStatus === 'staged' || hunkStatus === 'unstaged') && (
+                            <button
+                              type="button"
+                              data-testid="diff-hunk-restore"
+                              disabled={!canRestore || isPending || !stageHeader}
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                if (!stageHeader) return;
+                                restoreHunk(file.path, restoreScope, stageHeader, hunkKey);
+                              }}
+                              className="st-diff-hunk-btn"
+                              title={canRestore ? 'Restore hunk' : 'Unavailable'}
+                            >
+                              {isPending ? '…' : 'Restore'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     );

@@ -8,6 +8,7 @@ vi.mock('../../../utils/api', () => ({
     sessions: {
       stageHunk: vi.fn(),
       changeFileStage: vi.fn(),
+      restoreHunk: vi.fn(),
     },
   },
 }));
@@ -114,6 +115,27 @@ index 0000000..abcdefg
 
     await waitFor(() => {
       expect(API.sessions.stageHunk).toHaveBeenCalledWith('s1', expect.objectContaining({ isStaging: false }));
+    });
+  });
+
+  it('restores a hunk using the current scope', async () => {
+    (API.sessions.restoreHunk as any).mockResolvedValue({ success: true, data: { success: true } });
+    render(
+      <ZedDiffViewer
+        diff={SAMPLE_DIFF_TWO_HUNKS}
+        sessionId="s1"
+        currentScope="unstaged"
+        unstagedDiff={SAMPLE_DIFF_TWO_HUNKS}
+      />
+    );
+
+    const restore = screen.getAllByTestId('diff-hunk-restore')[0] as HTMLButtonElement;
+    await act(async () => {
+      fireEvent.click(restore);
+    });
+
+    await waitFor(() => {
+      expect(API.sessions.restoreHunk).toHaveBeenCalledWith('s1', expect.objectContaining({ scope: 'unstaged' }));
     });
   });
 

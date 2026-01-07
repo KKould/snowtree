@@ -148,15 +148,48 @@ export class GitStatusManager extends EventEmitter {
 
   private async getWorkingDiffStats(worktreePath: string, sessionId: string): Promise<{ filesChanged: number; additions: number; deletions: number }> {
     try {
-      const { stdout } = await this.gitExecutor.run({
+      const { stdout: trackedOut } = await this.gitExecutor.run({
         sessionId,
         cwd: worktreePath,
         argv: ['git', 'diff', '--shortstat', 'HEAD'],
         op: 'read',
         meta: { source: 'gitStatus', operation: 'working-shortstat' },
       });
-      const stats = this.gitDiffManager.parseShortstat(stdout);
-      return { filesChanged: stats.filesChanged, additions: stats.additions, deletions: stats.deletions };
+      const trackedStats = this.gitDiffManager.parseShortstat(trackedOut);
+
+      const { stdout: untrackedOut } = await this.gitExecutor.run({
+        sessionId,
+        cwd: worktreePath,
+        argv: ['git', 'ls-files', '--others', '--exclude-standard'],
+        op: 'read',
+        meta: { source: 'gitStatus', operation: 'untracked-list' },
+      });
+      
+      let untrackedAdditions = 0;
+      let untrackedFiles = 0;
+      const untrackedPaths = untrackedOut.trim().split('\n').filter(Boolean);
+      for (const filePath of untrackedPaths) {
+        try {
+          const { stdout: wcOut } = await this.gitExecutor.run({
+            sessionId,
+            cwd: worktreePath,
+            argv: ['wc', '-l', filePath],
+            op: 'read',
+            meta: { source: 'gitStatus', operation: 'untracked-linecount' },
+          });
+          const lines = parseInt(wcOut.trim().split(/\s+/)[0], 10) || 0;
+          untrackedAdditions += lines;
+          untrackedFiles++;
+        } catch {
+          untrackedFiles++;
+        }
+      }
+
+      return { 
+        filesChanged: trackedStats.filesChanged + untrackedFiles, 
+        additions: trackedStats.additions + untrackedAdditions, 
+        deletions: trackedStats.deletions 
+      };
     } catch {
       return { filesChanged: 0, additions: 0, deletions: 0 };
     }

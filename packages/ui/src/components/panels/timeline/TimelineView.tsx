@@ -19,6 +19,7 @@ const colors = {
     done: '#4ade80',
     running: '#fbbf24', 
     error: '#f87171',
+    interrupted: '#a1a1aa',
   },
   // User message card
   userCard: {
@@ -275,12 +276,12 @@ const AgentResponse: React.FC<{
   timestamp: string;
   endTimestamp: string;
 }> = ({ messages, commands, status, timestamp: _timestamp, endTimestamp }) => {
-  const [showCommands, setShowCommands] = useState(() => status === 'running');
+  const [showCommands, setShowCommands] = useState(() => status === 'running' || status === 'interrupted');
   const userToggledRef = useRef(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (status === 'running') {
+    if (status === 'running' || status === 'interrupted') {
       if (!userToggledRef.current) setShowCommands(true);
     } else {
       if (!userToggledRef.current) setShowCommands(false);
@@ -295,9 +296,9 @@ const AgentResponse: React.FC<{
     } catch { /* ignore */ }
   }, []);
 
-  const statusColor = status === 'running' ? colors.status.running 
-    : status === 'error' ? colors.status.error 
-    : status === 'interrupted' ? colors.status.running 
+  const statusColor = status === 'running' ? colors.status.running
+    : status === 'error' ? colors.status.error
+    : status === 'interrupted' ? colors.status.interrupted
     : colors.status.done;
   const totalDuration = commands.reduce((sum, c) => sum + (c.durationMs || 0), 0);
 
@@ -319,7 +320,11 @@ const AgentResponse: React.FC<{
           className="rounded-lg overflow-hidden"
           style={{ 
             backgroundColor: colors.command.bg,
-            border: status === 'running' ? `1px solid ${colors.status.running}33` : '1px solid transparent',
+            border: status === 'running'
+              ? `1px solid ${colors.status.running}33`
+              : status === 'interrupted'
+                ? `1px solid ${colors.status.interrupted}33`
+                : '1px solid transparent',
           }}
         >
           {/* Header */}
@@ -337,6 +342,8 @@ const AgentResponse: React.FC<{
             <span className="opacity-30">·</span>
             {status === 'running' ? (
               <Spinner className="text-amber-400" />
+            ) : status === 'interrupted' ? (
+              <XCircle className="w-3.5 h-3.5" style={{ color: statusColor }} />
             ) : (
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: statusColor }} />
             )}

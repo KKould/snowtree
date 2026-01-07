@@ -548,7 +548,7 @@ export function Sidebar() {
                                             {isRunning && (
                                               <Loader2 
                                                 className="w-3 h-3 animate-spin flex-shrink-0" 
-                                                style={{ color: 'var(--st-warning)' }}
+                                                style={{ color: 'var(--st-accent)' }}
                                               />
                                             )}
                                             <span className="text-[11px] st-text-faint flex-shrink-0">
@@ -559,19 +559,16 @@ export function Sidebar() {
                                       </div>
                                       <div className="flex items-center gap-1 text-[11px] font-mono flex-shrink-0">
                                         {(worktree.additions > 0 || worktree.deletions > 0) && (
-                                          <>
-                                            {worktree.additions > 0 && (
-                                              <span style={{ color: 'var(--st-success)' }}>+{worktree.additions}</span>
-                                            )}
-                                            {worktree.deletions > 0 && (
-                                              <span style={{ color: 'var(--st-danger)' }}>-{worktree.deletions}</span>
-                                            )}
-                                          </>
+                                          <span style={{ color: 'var(--st-accent)' }}>
+                                            {worktree.additions > 0 && `+${worktree.additions}`}
+                                            {worktree.additions > 0 && worktree.deletions > 0 && ' '}
+                                            {worktree.deletions > 0 && `-${worktree.deletions}`}
+                                          </span>
                                         )}
                                         {worktree.hasChanges && worktree.additions === 0 && worktree.deletions === 0 && (
                                           <span
                                             className="w-1.5 h-1.5 rounded-full"
-                                            style={{ backgroundColor: 'var(--st-warning)' }}
+                                            style={{ backgroundColor: 'var(--st-accent)' }}
                                             title="Has changes"
                                           />
                                         )}

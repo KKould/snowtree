@@ -245,13 +245,14 @@ export class GitFileWatcher extends EventEmitter {
       }
     }
 
-    // Also watch the gitdir itself for ref changes (best-effort, non-recursive).
+    // Also watch the gitdir itself (best-effort). On some platforms Git updates files
+    // via atomic replace, which can invalidate per-file watches; watching the directory
+    // makes staging/commit changes reliably detectable (Zed-style).
     try {
       const w = watch(gitdir, { persistent: true }, (eventType, filename) => {
         const name = filename ? String(filename) : '';
-        if (name.startsWith('refs') || name === 'refs' || name === 'packed-refs') {
-          this.handleGitMetadataChange(sessionId, join(gitdir, name), eventType);
-        }
+        // Always treat gitdir changes as refresh-worthy; debounce will batch them.
+        this.handleGitMetadataChange(sessionId, name ? join(gitdir, name) : gitdir, eventType);
       });
       watchers.push(w);
     } catch {

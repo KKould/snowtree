@@ -4,7 +4,7 @@ import { promises as fs } from 'fs';
 import { join } from 'path';
 
 export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): void {
-  const { sessionManager, gitDiffManager, gitStagingManager, gitExecutor } = services;
+  const { sessionManager, gitDiffManager, gitStagingManager, gitStatusManager, gitExecutor } = services;
 
   ipcMain.handle('sessions:get-executions', async (_event, sessionId: string) => {
     try {
@@ -214,6 +214,10 @@ export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): vo
         hunkHeader: options.hunkHeader,
       });
 
+      if (result.success) {
+        void gitStatusManager.refreshSessionGitStatus(sessionId, false);
+      }
+
       return result;
     } catch (error) {
       return {
@@ -242,6 +246,10 @@ export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): vo
         hunkHeader: options.hunkHeader,
       });
 
+      if (result.success) {
+        void gitStatusManager.refreshSessionGitStatus(sessionId, false);
+      }
+
       return result;
     } catch (error) {
       return {
@@ -265,6 +273,10 @@ export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): vo
         sessionId,
         stage: options.stage,
       });
+
+      if (result.success) {
+        void gitStatusManager.refreshSessionGitStatus(sessionId, false);
+      }
 
       return result;
     } catch (error) {
@@ -295,6 +307,10 @@ export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): vo
         filePath,
         stage,
       });
+
+      if (result.success) {
+        void gitStatusManager.refreshSessionGitStatus(sessionId, false);
+      }
 
       return result;
     } catch (error) {

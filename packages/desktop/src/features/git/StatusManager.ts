@@ -78,6 +78,10 @@ export class GitStatusManager extends EventEmitter {
     hasStaged: boolean;
     hasUntracked: boolean;
     hasConflicts: boolean;
+    modified: number;
+    staged: number;
+    untracked: number;
+    conflicted: number;
   }> {
     const { stdout } = await this.gitExecutor.run({
       sessionId,
@@ -92,25 +96,38 @@ export class GitStatusManager extends EventEmitter {
     let hasUntracked = false;
     let hasConflicts = false;
 
+    let modified = 0;
+    let staged = 0;
+    let untracked = 0;
+    let conflicted = 0;
+
     for (const line of stdout.split('\n')) {
       if (!line) continue;
       if (line.startsWith('??')) {
         hasUntracked = true;
+        untracked++;
         continue;
       }
       if (line.length < 2) continue;
       const x = line[0];
       const y = line[1];
 
-      if (x !== ' ' && x !== '?') hasStaged = true;
-      if (y !== ' ' && y !== '?') hasModified = true;
+      if (x !== ' ' && x !== '?') {
+        hasStaged = true;
+        staged++;
+      }
+      if (y !== ' ' && y !== '?') {
+        hasModified = true;
+        modified++;
+      }
 
       if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) {
         hasConflicts = true;
+        conflicted++;
       }
     }
 
-    return { hasModified, hasStaged, hasUntracked, hasConflicts };
+    return { hasModified, hasStaged, hasUntracked, hasConflicts, modified, staged, untracked, conflicted };
   }
 
   private async getAheadBehind(worktreePath: string, sessionId: string, mainBranch: string): Promise<{ ahead: number; behind: number }> {
@@ -385,6 +402,12 @@ export class GitStatusManager extends EventEmitter {
           const summary = await this.getPorcelainSummary(session.worktreePath, sessionId);
           updatedStatus.hasUncommittedChanges = summary.hasModified || summary.hasStaged;
           updatedStatus.hasUntrackedFiles = summary.hasUntracked;
+          updatedStatus.staged = summary.staged > 0 ? summary.staged : undefined;
+          updatedStatus.modified = summary.modified > 0 ? summary.modified : undefined;
+          updatedStatus.untracked = summary.untracked > 0 ? summary.untracked : undefined;
+          updatedStatus.conflicted = summary.conflicted > 0 ? summary.conflicted : undefined;
+          updatedStatus.clean =
+            !updatedStatus.hasUncommittedChanges && !updatedStatus.hasUntrackedFiles && !summary.hasConflicts ? true : undefined;
           if (summary.hasConflicts) updatedStatus.state = 'conflict';
 
           if (updatedStatus.hasUncommittedChanges) {
@@ -648,6 +671,16 @@ export class GitStatusManager extends EventEmitter {
       if (cachedHasChanges !== currentHasChanges) {
         return true;
       }
+
+      // Detect state transitions that keep "has changes" true (e.g. stage/unstage operations).
+      if (
+        (cached.status.staged ?? 0) !== quickStatus.staged ||
+        (cached.status.modified ?? 0) !== quickStatus.modified ||
+        (cached.status.untracked ?? 0) !== quickStatus.untracked ||
+        (cached.status.conflicted ?? 0) !== quickStatus.conflicted
+      ) {
+        return true;
+      }
       
       // If both have no changes, check if ahead/behind changed
       if (!currentHasChanges) {
@@ -804,6 +837,11 @@ export class GitStatusManager extends EventEmitter {
 
       const result = {
         state,
+        staged: quickStatus.staged > 0 ? quickStatus.staged : undefined,
+        modified: quickStatus.modified > 0 ? quickStatus.modified : undefined,
+        untracked: quickStatus.untracked > 0 ? quickStatus.untracked : undefined,
+        conflicted: quickStatus.conflicted > 0 ? quickStatus.conflicted : undefined,
+        clean: !hasUncommittedChanges && !hasUntrackedFiles && !hasMergeConflicts ? true : undefined,
         ahead: ahead > 0 ? ahead : undefined,
         behind: behind > 0 ? behind : undefined,
         additions: uncommittedDiff.stats.additions > 0 ? uncommittedDiff.stats.additions : undefined,

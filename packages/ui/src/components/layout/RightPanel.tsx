@@ -450,6 +450,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
   const requestIdRef = useRef(0);
   const historyRequestIdRef = useRef(0);
   const refreshTimerRef = useRef<number | null>(null);
+  const changesRefreshTimerRef = useRef<number | null>(null);
   const selectedCommitHashRef = useRef<string | null>(null);
   const selectedIsUncommittedRef = useRef(false);
 
@@ -676,6 +677,10 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
         window.clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;
       }
+      if (changesRefreshTimerRef.current) {
+        window.clearTimeout(changesRefreshTimerRef.current);
+        changesRefreshTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -702,6 +707,19 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
       }
     }, 200);
   }, [session.id, fetchCommits, fetchFiles, selectedIsUncommitted]);
+
+  const scheduleChangesRefresh = useCallback(() => {
+    if (!session.id) return;
+    if (changesRefreshTimerRef.current) {
+      window.clearTimeout(changesRefreshTimerRef.current);
+    }
+    changesRefreshTimerRef.current = window.setTimeout(() => {
+      changesRefreshTimerRef.current = null;
+      if (selectedIsUncommittedRef.current) {
+        fetchFiles();
+      }
+    }, 80);
+  }, [session.id, fetchFiles]);
 
   // Refresh once after a run completes (running -> waiting/error/etc).
   const prevStatusRef = useRef(session.status);
@@ -736,6 +754,17 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
     prevGitSigRef.current = gitSig;
     scheduleRefresh();
   }, [session.id, gitSig, scheduleRefresh]);
+
+  // Zed-style: refresh changes whenever git status is updated for this session.
+  // This covers staging operations that don't change the "has changes" booleans.
+  useEffect(() => {
+    if (!session.id) return;
+    const unsub = window.electronAPI?.events?.onGitStatusUpdated?.((data) => {
+      if (!data || data.sessionId !== session.id) return;
+      scheduleChangesRefresh();
+    });
+    return () => { if (unsub) unsub(); };
+  }, [session.id, scheduleChangesRefresh]);
 
   // Refresh after agent-run git commands that can change History/WT state.
   useEffect(() => {
@@ -803,10 +832,10 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
         console.error('[RightPanel] Failed to change stage state', err);
       } finally {
         setIsStageChanging(false);
-        handleRefresh();
+        scheduleChangesRefresh();
       }
     },
-    [handleRefresh, isStageChanging, session.id]
+    [isStageChanging, scheduleChangesRefresh, session.id]
   );
 
   const handleChangeFileStage = useCallback(
@@ -819,10 +848,10 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(({
         console.error('[RightPanel] Failed to change file stage state', err);
       } finally {
         setIsStageChanging(false);
-        handleRefresh();
+        scheduleChangesRefresh();
       }
     },
-    [handleRefresh, isStageChanging, session.id]
+    [isStageChanging, scheduleChangesRefresh, session.id]
   );
 
   const trackedFiles = useMemo(() => {

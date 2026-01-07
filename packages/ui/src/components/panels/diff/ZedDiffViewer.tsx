@@ -416,6 +416,10 @@ export const ZedDiffViewer: React.FC<{
               0 0 0 3px color-mix(in srgb, var(--st-hunk-frame-color) 18%, transparent);
             transition: opacity 110ms ease;
           }
+          /* Zed-like: staged hunks have a persistent frame to distinguish them from unstaged hunks. */
+          .st-diff-table .diff-hunk:has(.st-hunk-status--staged):has(.diff-code-insert, .diff-code-delete)::after {
+            opacity: 0.55;
+          }
           .st-diff-table .diff-hunk:has(.diff-code-insert, .diff-code-delete):hover::after,
           .st-diff-table .diff-hunk:has(.diff-code-insert, .diff-code-delete):focus-within::after {
             opacity: 1;

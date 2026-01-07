@@ -139,4 +139,18 @@ describe('ZedDiffViewer', () => {
     expect(headers[0]).toBe('a.txt');
     expect(headers[1]).toBe('b.txt');
   });
+
+  it('renders a persistent frame style for staged hunks', () => {
+    const { container } = render(
+      <ZedDiffViewer
+        diff={SAMPLE_DIFF_TWO_HUNKS}
+        sessionId="s1"
+        currentScope="staged"
+        stagedDiff={SAMPLE_DIFF_TWO_HUNKS}
+      />
+    );
+    const css = container.querySelector('style')?.textContent || '';
+    expect(css).toContain('st-hunk-status--staged');
+    expect(css).toContain('Zed-like: staged hunks have a persistent frame');
+  });
 });

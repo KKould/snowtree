@@ -81,7 +81,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "BohuTANG",
+        "owner": "bohutang",
         "repo": "snowtree"
       }
     ],

@@ -28,10 +28,10 @@ Round N: Done → Commit → Push PR
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/BohuTANG/snowtree/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/bohutang/snowtree/main/install.sh | sh
 ```
 
-Or [download releases](https://github.com/BohuTANG/snowtree/releases): macOS `.dmg` / Linux `.deb` `.AppImage`
+Or [download releases](https://github.com/bohutang/snowtree/releases): macOS `.dmg` / Linux `.deb` `.AppImage`
 
 ## Build
 

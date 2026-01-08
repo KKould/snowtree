@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="BohuTANG/snowtree"
+REPO="bohutang/snowtree"
 APP_NAME="snowtree"
 
 # Colors

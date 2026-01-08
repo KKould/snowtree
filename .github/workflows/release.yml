@@ -31,9 +31,9 @@ jobs:
         run: pnpm install
 
       - name: Build application
-        run: pnpm run build
+        run: pnpm --filter @snowtree/core build && pnpm --filter @snowtree/desktop build && pnpm --filter @snowtree/ui build
 
       - name: Publish to GitHub Releases
-        run: pnpm run build:electron -- --publish always
+        run: pnpm exec electron-builder --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

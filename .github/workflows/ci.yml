@@ -25,6 +25,7 @@ jobs:
           git config --global user.email "test@example.com"
           git config --global user.name "Test User"
 
+      - run: pnpm --filter @snowtree/core build
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm --filter @snowtree/ui test

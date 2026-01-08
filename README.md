@@ -1,62 +1,44 @@
 # Snowtree
 
-**Run multiple AI coding sessions in parallel, each in its own git worktree.**
+**AI writes code. You can't review it all. You can't rollback safely.**
 
-## Features
-
-- **Parallel AI Sessions** - Run Claude Code, Codex, or other AI tools simultaneously
-- **Auto-managed Worktrees** - Each session gets its own isolated git worktree
-- **Diff Review** - Review and approve AI changes before commit
-- **Session Timeline** - Full history of commands and changes
-
-## Screenshots
+Snowtree fixes this: **Worktree isolation + Incremental review + Stage as snapshot**.
 
 <table>
   <tr>
-    <td align="center"><b>Chat Interface</b></td>
-    <td align="center"><b>Diff Review</b></td>
-  </tr>
-  <tr>
-    <td><img src="assets/chat.png" alt="Chat Interface" /></td>
+    <td><img src="assets/chat.png" alt="Chat" /></td>
     <td><img src="assets/diff-review.png" alt="Diff Review" /></td>
   </tr>
 </table>
 
-## Installation
+## How It Works
 
-### One-line Install (macOS & Linux)
+**Isolated Worktrees** — Each AI session in its own worktree. Parallel, no conflicts.
+
+**Native CLI** — Runs Claude Code, Codex directly. No wrapper.
+
+**Incremental Review** — Review each round. Stage approved code. Next round, review diff only.
+
+```
+Round 1: AI codes → Review → Stage
+Round 2: AI continues → Review diff → Stage
+Round N: Done → Commit → Push PR
+```
+
+## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BohuTANG/snowtree/main/install.sh | sh
 ```
 
-### Manual Download
+Or [download releases](https://github.com/BohuTANG/snowtree/releases): macOS `.dmg` / Linux `.deb` `.AppImage`
 
-Download from [GitHub Releases](https://github.com/BohuTANG/snowtree/releases):
-
-| Platform | File |
-|----------|------|
-| macOS (Intel & Apple Silicon) | `snowtree-*-macOS-universal.dmg` |
-| Linux (Debian/Ubuntu) | `snowtree-*-linux-x64.deb` |
-| Linux (Other) | `snowtree-*-linux-x64.AppImage` |
-
-### Build from Source
+## Build
 
 ```bash
-make install
-make run
+make install && make run
 ```
-
-## Testing
-
-```bash
-make check         # typecheck + lint + unit tests
-make e2e           # Playwright (browser)
-make e2e-electron  # Playwright (Electron; needs a display on Linux)
-```
-
-Run `make` to see all available targets.
 
 ## License
 
-Apache-2.0 © 2026 BohuTANG
+Apache-2.0

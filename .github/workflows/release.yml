@@ -43,20 +43,20 @@ jobs:
           echo "RELEASE_APP_DIR=${RELEASE_APP_DIR}" >> "${GITHUB_ENV}"
 
           rm -rf "${RELEASE_APP_DIR}"
-          mkdir -p "${RELEASE_APP_DIR}/packages/desktop" "${RELEASE_APP_DIR}/packages/ui"
+          mkdir -p "${RELEASE_APP_DIR}/packages/desktop" "${RELEASE_APP_DIR}/packages/ui" "${RELEASE_APP_DIR}/vendor/snowtree-core"
 
           cp package.json pnpm-lock.yaml .npmrc LICENSE "${RELEASE_APP_DIR}/"
           cp -R packages/desktop/dist "${RELEASE_APP_DIR}/packages/desktop/dist"
           cp -R packages/desktop/assets "${RELEASE_APP_DIR}/packages/desktop/assets"
           cp -R packages/ui/dist "${RELEASE_APP_DIR}/packages/ui/dist"
 
-          pushd "${RELEASE_APP_DIR}"
-          pnpm install -P --frozen-lockfile --ignore-scripts
+          cp "${GITHUB_WORKSPACE}/packages/core/package.json" "${RELEASE_APP_DIR}/vendor/snowtree-core/package.json"
+          cp -R "${GITHUB_WORKSPACE}/packages/core/dist" "${RELEASE_APP_DIR}/vendor/snowtree-core/dist"
+          cp -R "${GITHUB_WORKSPACE}/packages/core/dist-cjs" "${RELEASE_APP_DIR}/vendor/snowtree-core/dist-cjs"
 
-          mkdir -p node_modules/@snowtree/core
-          cp "${GITHUB_WORKSPACE}/packages/core/package.json" node_modules/@snowtree/core/package.json
-          cp -R "${GITHUB_WORKSPACE}/packages/core/dist" node_modules/@snowtree/core/dist
-          cp -R "${GITHUB_WORKSPACE}/packages/core/dist-cjs" node_modules/@snowtree/core/dist-cjs
+          pushd "${RELEASE_APP_DIR}"
+          node -e "const fs=require('fs'); const p='package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.dependencies=j.dependencies||{}; j.dependencies['@snowtree/core']='file:vendor/snowtree-core'; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\\n');"
+          pnpm install -P --ignore-scripts
           popd
 
       - name: Rebuild native dependencies (Electron)

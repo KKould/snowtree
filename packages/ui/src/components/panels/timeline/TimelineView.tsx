@@ -91,6 +91,14 @@ const isSingleLineCodexPhaseMarker = (text: string): boolean => {
   return t.length <= 120;
 };
 
+const getCommandKind = (eventKind: string): 'cli' | 'git' | 'worktree' => {
+  switch (eventKind) {
+    case 'cli.command': return 'cli';
+    case 'worktree.command': return 'worktree';
+    default: return 'git';
+  }
+};
+
 // Build timeline items - groups everything between user messages into agent responses
 const buildItems = (events: TimelineEvent[], sessionToolType?: Session['toolType']): TimelineItem[] => {
   type FlatItem =
@@ -166,7 +174,7 @@ const buildItems = (events: TimelineEvent[], sessionToolType?: Session['toolType
         type: 'command',
         seq: event.seq,
         timestamp: event.timestamp,
-        kind: event.kind === 'cli.command' ? 'cli' : event.kind === 'worktree.command' ? 'worktree' : 'git',
+        kind: getCommandKind(event.kind),
         status: event.status,
         command: event.command || '',
         cwd: event.cwd,
@@ -210,7 +218,7 @@ const buildItems = (events: TimelineEvent[], sessionToolType?: Session['toolType
         type: 'command',
         seq: first.seq,
         timestamp: first.timestamp,
-        kind: first.kind === 'cli.command' ? 'cli' : first.kind === 'worktree.command' ? 'worktree' : 'git',
+        kind: getCommandKind(first.kind),
         status: last.status,
         command: first.command || last.command || '',
         cwd: first.cwd || last.cwd,
@@ -298,12 +306,17 @@ const buildItems = (events: TimelineEvent[], sessionToolType?: Session['toolType
 
     // Only add if there's content
     if (messages.length > 0 || commands.length > 0) {
+      const status = (() => {
+        if (hasRunning) return 'running';
+        if (hasError) return 'error';
+        return 'done';
+      })();
       items.push({
         type: 'agentResponse',
         seq: startSeq,
         timestamp: startTimestamp,
         endTimestamp,
-        status: hasRunning ? 'running' : hasError ? 'error' : 'done',
+        status,
         messages,
         commands
       });

@@ -22,11 +22,11 @@ export const CommitItem: React.FC<CommitItemProps> = React.memo(
       [commit.after_commit_hash]
     );
 
-    const bg = isSelected
-      ? colors.bg.selected
-      : isHovered && !isBase
-        ? colors.bg.hover
-        : 'transparent';
+    const bg = (() => {
+      if (isSelected) return colors.bg.selected;
+      if (isHovered && !isBase) return colors.bg.hover;
+      return 'transparent';
+    })();
 
     return (
       <div
@@ -62,11 +62,11 @@ export const CommitItem: React.FC<CommitItemProps> = React.memo(
               <span
                 className="flex-1 min-w-0 truncate font-medium"
                 style={{
-                  color: isUncommitted
-                    ? colors.text.modified
-                    : isSelected || isHovered
-                      ? colors.text.primary
-                      : colors.text.secondary,
+                  color: (() => {
+                    if (isUncommitted) return colors.text.modified;
+                    if (isSelected || isHovered) return colors.text.primary;
+                    return colors.text.secondary;
+                  })(),
                 }}
               >
                 {isUncommitted ? '' : commit.commit_message}

@@ -74,35 +74,23 @@ export class WorktreeNameGenerator {
     const gitRepoPath = this.configManager.getGitRepoPath();
     const worktreesPath = path.join(gitRepoPath, 'worktrees');
 
-    let baseName = this.generateWorktreeName();
-    let uniqueName = baseName;
-    let counter = 1;
-    let attempts = 0;
-    const maxAttempts = CITY_NAMES.length;
-
-    try {
-      await fs.access(worktreesPath);
-
-      while (await this.worktreeExists(worktreesPath, uniqueName)) {
-        if (counter > 1) {
-          baseName = this.generateWorktreeName();
-          uniqueName = baseName;
-          counter = 1;
-          attempts++;
-          if (attempts >= maxAttempts) {
-            uniqueName = `${baseName}-${Date.now()}`;
-            break;
-          }
-        } else {
-          uniqueName = `${baseName}-${counter}`;
-          counter++;
-        }
-      }
-    } catch {
-      // worktrees directory doesn't exist yet
+    // Check if worktrees directory exists
+    const worktreesDirExists = await fs.access(worktreesPath).then(() => true).catch(() => false);
+    if (!worktreesDirExists) {
+      return this.generateWorktreeName();
     }
 
-    return uniqueName;
+    // Try generating unique names with random suffixes
+    const maxAttempts = CITY_NAMES.length;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const candidate = this.generateWorktreeName();
+      if (!(await this.worktreeExists(worktreesPath, candidate))) {
+        return candidate;
+      }
+    }
+
+    // Fallback: use timestamp to guarantee uniqueness
+    return `${this.generateWorktreeName()}-${Date.now()}`;
   }
 
   private async worktreeExists(worktreesPath: string, name: string): Promise<boolean> {

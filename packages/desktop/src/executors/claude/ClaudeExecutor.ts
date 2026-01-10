@@ -68,30 +68,22 @@ export class ClaudeExecutor extends AbstractExecutor {
 
   async testAvailability(customPath?: string): Promise<ExecutorAvailability> {
     try {
-      const command = customPath || this.getCommandName();
-
-      // Try to find in PATH first
-      if (!customPath) {
-        const foundPath = await findExecutableInPath(command);
-        if (!foundPath) {
-          return {
-            available: false,
-            error: `${command} not found in PATH`,
-          };
-        }
-      }
+      const commandName = this.getCommandName();
+      const resolved = customPath || (await findExecutableInPath(commandName)) || commandName;
 
       // Test with --version
+      const command = resolved.includes(' ') ? `"${resolved}"` : resolved;
+      const env = await this.getSystemEnvironment();
       const { stdout } = await execAsync(`${command} --version`, {
         timeout: 10000,
-        env: process.env,
+        env,
       });
 
       const version = stdout.trim();
       return {
         available: true,
         version,
-        path: customPath || command,
+        path: resolved,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

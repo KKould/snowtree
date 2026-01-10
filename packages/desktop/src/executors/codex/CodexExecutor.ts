@@ -87,9 +87,10 @@ export class CodexExecutor extends AbstractExecutor {
     try {
       const resolved = customPath || (await findExecutableInPath('codex')) || 'codex';
       const command = resolved.includes(' ') ? `"${resolved}"` : resolved;
+      const env = await this.getSystemEnvironment();
       const { stdout } = await execAsync(`${command} --version`, {
         timeout: 30000,
-        env: process.env,
+        env,
       });
 
       const version = stdout.trim();
@@ -102,9 +103,10 @@ export class CodexExecutor extends AbstractExecutor {
       // Fallback to npx if no explicit custom path is set.
       if (!customPath) {
         try {
+          const env = await this.getSystemEnvironment();
           const { stdout } = await execAsync('npx -y @openai/codex@latest --version', {
             timeout: 30000,
-            env: process.env,
+            env,
           });
           const version = stdout.trim();
           return {

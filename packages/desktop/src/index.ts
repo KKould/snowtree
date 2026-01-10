@@ -797,6 +797,51 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async (event) => {
+  const isInstallingUpdate =
+    Boolean(updateManager && typeof updateManager.isInstallingUpdate === 'function' && updateManager.isInstallingUpdate());
+
+  if (isInstallingUpdate) {
+    // When installing an update we must exit quickly; long grace periods can make "Restart" feel unresponsive.
+    if (sessionManager) {
+      try {
+        await sessionManager.cleanup({ fast: true });
+      } catch {
+        // best-effort
+      }
+    }
+    if (gitStatusManager) {
+      gitStatusManager.stopPolling();
+    }
+    if (updateManager) {
+      updateManager.cleanup();
+    }
+    if (claudeExecutor) {
+      try {
+        await claudeExecutor.cleanup();
+      } catch {
+        // best-effort
+      }
+    }
+    if (codexExecutor) {
+      try {
+        await codexExecutor.cleanup();
+      } catch {
+        // best-effort
+      }
+    }
+    if (taskQueue) {
+      try {
+        await taskQueue.close();
+      } catch {
+        // best-effort
+      }
+    }
+    if (logger) {
+      logger.close();
+    }
+    return;
+  }
+
   // Cleanup all sessions and terminate child processes
   if (sessionManager) {
     console.log('[Main] Cleaning up sessions and terminating child processes...');

@@ -236,12 +236,24 @@ describe('UpdateManager', () => {
   });
 
   describe('quitAndInstall', () => {
-    it('should call autoUpdater.quitAndInstall', async () => {
+    it('should not call autoUpdater.quitAndInstall if update is not downloaded', async () => {
       await updateManager.initialize();
 
       updateManager.quitAndInstall();
 
+      expect(mockQuitAndInstall).not.toHaveBeenCalled();
+    });
+
+    it('should call autoUpdater.quitAndInstall once update is downloaded', async () => {
+      await updateManager.initialize();
+
+      // Simulate download complete
+      (mockAutoUpdater as EventEmitter).emit('update-downloaded');
+
+      updateManager.quitAndInstall();
+
       expect(mockQuitAndInstall).toHaveBeenCalledTimes(1);
+      expect(mockQuitAndInstall).toHaveBeenCalledWith(false, true);
     });
   });
 

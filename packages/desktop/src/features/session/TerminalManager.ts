@@ -100,7 +100,7 @@ export class TerminalManager extends EventEmitter {
     }
   }
 
-  async closeTerminalSession(sessionId: string): Promise<void> {
+  async closeTerminalSession(sessionId: string, options?: { fast?: boolean }): Promise<void> {
     const session = this.terminalSessions.get(sessionId);
     if (session) {
       try {
@@ -108,7 +108,7 @@ export class TerminalManager extends EventEmitter {
         
         // Kill the process tree to ensure all child processes are terminated
         if (pid) {
-          const success = await this.killProcessTree(pid);
+          const success = await this.killProcessTree(pid, options);
           if (!success) {
             // Emit warning about zombie processes
             this.emit('zombie-processes-detected', {
@@ -135,11 +135,11 @@ export class TerminalManager extends EventEmitter {
     return this.terminalSessions.has(sessionId);
   }
 
-  async cleanup(): Promise<void> {
+  async cleanup(options?: { fast?: boolean }): Promise<void> {
     // Close all terminal sessions
     const closePromises = [];
     for (const sessionId of this.terminalSessions.keys()) {
-      closePromises.push(this.closeTerminalSession(sessionId));
+      closePromises.push(this.closeTerminalSession(sessionId, options));
     }
     await Promise.all(closePromises);
   }
@@ -198,9 +198,10 @@ export class TerminalManager extends EventEmitter {
    * Kill a process and all its descendants
    * Returns true if successful, false if zombie processes remain
    */
-  private async killProcessTree(pid: number): Promise<boolean> {
+  private async killProcessTree(pid: number, options?: { fast?: boolean }): Promise<boolean> {
     const platform = os.platform();
     const execAsync = promisify(exec);
+    const fast = options?.fast === true;
     
     // First, get all descendant PIDs before we start killing
     const descendantPids = this.getAllDescendantPids(pid);
@@ -251,8 +252,8 @@ export class TerminalManager extends EventEmitter {
           console.warn(`Error sending SIGTERM to process group: ${error}`);
         }
         
-        // Give processes 10 seconds to clean up gracefully
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        // Give processes time to clean up gracefully (shorten for updater-driven restarts)
+        await new Promise(resolve => setTimeout(resolve, fast ? 250 : 10000));
         
         // Now forcefully kill the main process
         try {
@@ -286,7 +287,7 @@ export class TerminalManager extends EventEmitter {
       }
       
       // Verify all processes are actually dead
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise(resolve => setTimeout(resolve, fast ? 100 : 500));
       const remainingPids = this.getAllDescendantPids(pid);
       
       if (remainingPids.length > 0) {

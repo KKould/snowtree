@@ -24,6 +24,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
     const [updateVersion, setUpdateVersion] = useState<string>('');
     const [updateDownloading, setUpdateDownloading] = useState(false);
     const [updateDownloaded, setUpdateDownloaded] = useState(false);
+    const [updateInstalling, setUpdateInstalling] = useState(false);
     const [updateError, setUpdateError] = useState<string>('');
 
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -78,11 +79,13 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
           setUpdateAvailable(true);
           setUpdateVersion(version);
           setUpdateDownloaded(false);
+          setUpdateInstalling(false);
           setUpdateError('');
         }),
         events.onUpdateDownloaded(() => {
           setUpdateDownloading(false);
           setUpdateDownloaded(true);
+          setUpdateInstalling(false);
         }),
       ];
 
@@ -111,9 +114,16 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
     const handleInstallUpdate = useCallback(async () => {
       if (!window.electronAPI?.updater) return;
       try {
-        await window.electronAPI.updater.install();
-      } catch {
-        // ignore
+        setUpdateInstalling(true);
+        setUpdateError('');
+        const res = await window.electronAPI.updater.install();
+        if (!res?.success) {
+          setUpdateInstalling(false);
+          setUpdateError(res?.error || 'Failed to install update');
+        }
+      } catch (e) {
+        setUpdateInstalling(false);
+        setUpdateError(e instanceof Error ? e.message : String(e));
       }
     }, []);
 
@@ -480,17 +490,21 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
                     ) : (
                       <Download className="w-3 h-3" />
                     )}
-                    Update
+                    {updateVersion ? `Update v${updateVersion}` : 'Update'}
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={handleInstallUpdate}
+                    disabled={updateInstalling}
                     className="flex items-center gap-1 px-2 py-1 rounded text-[10px] transition-all duration-75 st-hoverable st-focus-ring"
                     style={{ color: colors.accent }}
                     title={`Restart to install v${updateVersion}`}
                   >
-                    Restart
+                    {updateInstalling ? (
+                      <RotateCw className="w-3 h-3 animate-spin" />
+                    ) : null}
+                    {updateVersion ? `Restart v${updateVersion}` : 'Restart'}
                   </button>
                 )}
               </div>

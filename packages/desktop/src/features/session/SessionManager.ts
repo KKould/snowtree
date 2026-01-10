@@ -1776,9 +1776,9 @@ export class SessionManager extends EventEmitter {
     return scriptExecutionTracker.getRunningScriptId('session') as string | null;
   }
 
-  async cleanup(): Promise<void> {
+  async cleanup(options?: { fast?: boolean }): Promise<void> {
     this.stopRunningScript();
-    await this.terminalSessionManager.cleanup();
+    await this.terminalSessionManager.cleanup(options);
   }
 
   async runTerminalCommand(sessionId: string, command: string): Promise<void> {

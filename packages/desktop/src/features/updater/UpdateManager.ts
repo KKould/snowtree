@@ -14,6 +14,8 @@ import { EventEmitter } from 'events';
 
 export class UpdateManager extends EventEmitter {
   private updateAvailable = false;
+  private updateDownloaded = false;
+  private installingUpdate = false;
   private checkInterval: NodeJS.Timeout | null = null;
   private lastCheckTime = 0;
   private readonly CHECK_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes throttle
@@ -31,11 +33,13 @@ export class UpdateManager extends EventEmitter {
     // Listen for update availability
     autoUpdater.on('update-available', (info) => {
       this.updateAvailable = true;
+      this.updateDownloaded = false;
       this.emit('update-available', info.version);
     });
 
     // Listen for download completion
     autoUpdater.on('update-downloaded', () => {
+      this.updateDownloaded = true;
       this.emit('update-downloaded');
     });
 
@@ -95,10 +99,17 @@ export class UpdateManager extends EventEmitter {
     await autoUpdater.downloadUpdate();
   }
 
+  isInstallingUpdate(): boolean {
+    return this.installingUpdate;
+  }
+
   /**
    * Quit the application and install the downloaded update
    */
   quitAndInstall(): void {
-    autoUpdater.quitAndInstall();
+    if (!this.updateDownloaded) return;
+    this.installingUpdate = true;
+    // Force restart after install so the user sees the new version immediately.
+    autoUpdater.quitAndInstall(false, true);
   }
 }

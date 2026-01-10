@@ -1,6 +1,6 @@
 {
   "name": "snowtree",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "private": true,
   "description": "Snowtree - Multi-session AI CLI workspace manager with git worktrees",
   "homepage": "https://github.com/bohutang/snowtree",

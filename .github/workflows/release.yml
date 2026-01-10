@@ -35,9 +35,9 @@ jobs:
           echo "Creating draft release: ${TAG} (previous: ${PREV:-<none>})"
 
           if [ -n "${PREV}" ]; then
-            gh release create "${TAG}" --draft --generate-notes --notes-start-tag "${PREV}"
+            gh release create "${TAG}" --draft --latest=false --verify-tag --generate-notes --notes-start-tag "${PREV}"
           else
-            gh release create "${TAG}" --draft --generate-notes
+            gh release create "${TAG}" --draft --latest=false --verify-tag --generate-notes
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -175,6 +175,17 @@ jobs:
               if not body.endswith("\n"):
                   f.write("\n")
           PY
+
+          {
+            echo ""
+            echo "## Commits"
+            if [ -n "${PREV}" ]; then
+              git log --no-merges --pretty=format:'- %s (%h)' "${PREV}..${TAG}" || true
+            else
+              git log --no-merges -n 50 --pretty=format:'- %s (%h)' "${TAG}" || true
+            fi
+            echo ""
+          } >> release-notes.md
 
           gh release edit "${TAG}" --draft=false --latest --notes-file release-notes.md
         env:

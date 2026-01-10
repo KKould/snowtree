@@ -4,12 +4,7 @@
 
 Snowtree fixes this: **Worktree isolation + Incremental review + Stage as snapshot**.
 
-<table>
-  <tr>
-    <td><img src="assets/chat.png" alt="Chat" /></td>
-    <td><img src="assets/diff-review.png" alt="Diff Review" /></td>
-  </tr>
-</table>
+![Snowtree Demo](assets/snowtree-show.gif)
 
 ## How It Works
 

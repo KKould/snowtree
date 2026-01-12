@@ -333,6 +333,6 @@ jobs:
           fi
 
           echo "Publishing prerelease: ${TAG}"
-          gh release edit "${TAG}" --draft=false --prerelease
+          gh release edit "${TAG}" --draft=false --prerelease --repo "${GITHUB_REPOSITORY}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

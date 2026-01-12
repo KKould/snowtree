@@ -112,6 +112,7 @@ export function ToolCallMessage({
             <InlineDiffViewer
               oldString={oldString}
               newString={newString}
+              filePath={filePath}
               className="tool-diff-viewer"
             />
           </div>

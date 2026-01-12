@@ -535,6 +535,7 @@ const AgentResponse: React.FC<{
                 // Check for Edit tool diff data
                 const oldString = typeof meta.oldString === 'string' ? meta.oldString : undefined;
                 const newString = typeof meta.newString === 'string' ? meta.newString : undefined;
+                const filePath = typeof meta.filePath === 'string' ? meta.filePath : undefined;
                 const isEditWithDiff = meta.toolName === 'Edit' && oldString && newString;
 
                 return (
@@ -571,6 +572,7 @@ const AgentResponse: React.FC<{
                         <InlineDiffViewer
                           oldString={oldString}
                           newString={newString}
+                          filePath={filePath}
                         />
                       </div>
                     )}

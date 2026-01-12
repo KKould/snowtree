@@ -8,11 +8,9 @@ Snowtree fixes this: **Worktree isolation + Incremental review + Stage as snapsh
 
 ## How It Works
 
-**Isolated Worktrees** — Each AI session in its own worktree. Parallel, no conflicts.
-
-**Native CLI** — Runs Claude Code, Codex directly. No wrapper.
-
-**Incremental Review** — Review each round. Stage approved code. Next round, review diff only.
+- **Isolated Worktrees** — Each AI session runs in its own worktree. Work in parallel without conflicts.
+- **Native CLI** — Runs Claude Code or Codex directly. No wrapper overhead.
+- **Incremental Review** — Review each round, stage approved code. Next round reviews only new changes.
 
 ```
 Round 1: AI codes → Review → Stage
@@ -22,36 +20,40 @@ Round N: Done → Commit → Push PR
 
 ## Prerequisites
 
-Snowtree calls AI coding agents directly via their CLI. Install at least one:
+Install at least one AI coding agent:
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — `npm install -g @anthropic-ai/claude-code`
-- [Codex](https://github.com/openai/codex) — `npm install -g @openai/codex`
+| Agent | Install |
+|-------|---------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `npm install -g @anthropic-ai/claude-code` |
+| [Codex](https://github.com/openai/codex) | `npm install -g @openai/codex` |
 
 ## Install
 
-Recommended (one-line installer, macOS/Linux):
+**One-line installer (macOS/Linux):**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bohutang/snowtree/main/install.sh | sh
 ```
 
-Manual install: https://github.com/bohutang/snowtree/releases
+**Manual download:** [GitHub Releases](https://github.com/bohutang/snowtree/releases)
 
-- macOS: `.dmg` (`arm64`, `x64`)
-- Linux: `.deb` / `.AppImage` (`x86_64`)
-- Windows: not available yet
+| Platform | Format |
+|----------|--------|
+| macOS | `.dmg` (arm64, x64) |
+| Linux | `.deb`, `.AppImage` (x86_64) |
 
 ## Development
 
 ```bash
-make install
-make run
+make install   # Install dependencies
+make run       # Start development server
+make check     # Typecheck, lint, and test
+make build     # Build packages
 ```
 
-Common commands:
+## Blog
 
-- Typecheck/lint/tests: `make check`
-- Build packages: `make build`
+[Snowtree: Review-Driven Safe AI Coding](https://www.bohutang.me/2026/01/10/snowtree-review-driven-safe-ai-coding/)
 
 ## License
 

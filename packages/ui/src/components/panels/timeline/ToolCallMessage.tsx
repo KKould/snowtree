@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import './ToolCallMessage.css';
+import { InlineDiffViewer } from './InlineDiffViewer';
 
 export interface ToolCallMessageProps {
   toolName: string;
@@ -97,11 +98,32 @@ export function ToolCallMessage({
 
     if (toolName === 'Edit') {
       const oldString = input.old_string as string | undefined;
+      const newString = input.new_string as string | undefined;
+      const filePath = input.file_path as string | undefined;
+
+      // Show diff view if both old and new strings are available
+      if (oldString && newString) {
+        return (
+          <div className="tool-params">
+            <div className="param-header">
+              <span className="param-label">📝 File:</span>{' '}
+              <code className="param-value">{String(filePath || 'unknown')}</code>
+            </div>
+            <InlineDiffViewer
+              oldString={oldString}
+              newString={newString}
+              className="tool-diff-viewer"
+            />
+          </div>
+        );
+      }
+
+      // Fallback: show old string only (for backwards compatibility)
       return (
         <div className="tool-params">
           <div>
             <span className="param-label">📝 File:</span>{' '}
-            <code className="param-value">{String(input.file_path || 'unknown')}</code>
+            <code className="param-value">{String(filePath || 'unknown')}</code>
           </div>
           {oldString && (
             <div className="param-detail">

@@ -488,6 +488,16 @@ export abstract class AbstractExecutor extends EventEmitter {
 
       const cwd = this.sessionManager.getSession(sessionId)?.worktreePath;
       const runtime = this.runtimeMetaByPanel.get(panelId) || {};
+
+      // Extract Edit tool input for diff display
+      const toolInput = enriched.metadata?.input as Record<string, unknown> | undefined;
+      const isEditTool = enriched.toolName === 'Edit';
+      const editMeta = isEditTool && toolInput ? {
+        oldString: toolInput.old_string as string | undefined,
+        newString: toolInput.new_string as string | undefined,
+        filePath: toolInput.file_path as string | undefined,
+      } : {};
+
       this.recordTimelineCommand({
         sessionId,
         panelId,
@@ -505,6 +515,7 @@ export abstract class AbstractExecutor extends EventEmitter {
           agentQuery: 'query' in action ? (action as { query?: string }).query : undefined,
           agentUrl: 'url' in action ? (action as { url?: string }).url : undefined,
           ...runtime,
+          ...editMeta,
         }
       });
       return;

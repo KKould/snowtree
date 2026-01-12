@@ -10,6 +10,7 @@ import { formatDistanceToNow, parseTimestamp } from '../../../utils/timestampUti
 import { ThinkingMessage } from './ThinkingMessage';
 import { ToolCallMessage } from './ToolCallMessage';
 import { UserQuestionDialog, type Question } from './UserQuestionDialog';
+import { InlineDiffViewer } from './InlineDiffViewer';
 import './MessageStyles.css';
 
 const colors = {
@@ -531,6 +532,11 @@ const AgentResponse: React.FC<{
                 const isInterrupted = metaTermination === 'interrupted';
                 const isFailed = !isInterrupted && (cmdStatus === 'failed' || (typeof c.exitCode === 'number' && c.exitCode !== 0));
 
+                // Check for Edit tool diff data
+                const oldString = typeof meta.oldString === 'string' ? meta.oldString : undefined;
+                const newString = typeof meta.newString === 'string' ? meta.newString : undefined;
+                const isEditWithDiff = meta.toolName === 'Edit' && oldString && newString;
+
                 return (
                   <div key={key}>
                     <div className="command-item">
@@ -560,6 +566,14 @@ const AgentResponse: React.FC<{
                         </button>
                       </div>
                     </div>
+                    {isEditWithDiff && (
+                      <div className="command-diff">
+                        <InlineDiffViewer
+                          oldString={oldString}
+                          newString={newString}
+                        />
+                      </div>
+                    )}
                     {showStdout && (
                       <pre className="command-output stdout">{stdout}</pre>
                     )}

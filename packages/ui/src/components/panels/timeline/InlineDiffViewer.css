@@ -1,0 +1,135 @@
+.inline-diff-viewer {
+  font-family: var(--st-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--st-bg, #1a1a1a);
+  border: 1px solid var(--st-border, #333);
+}
+
+.inline-diff-viewer .diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--st-surface, #252525);
+  border-bottom: 1px solid var(--st-border, #333);
+  font-size: 11px;
+}
+
+.inline-diff-viewer .diff-file-path {
+  color: var(--st-text-secondary, #aaa);
+  font-weight: 500;
+}
+
+.inline-diff-viewer .diff-stats {
+  display: flex;
+  gap: 8px;
+}
+
+.inline-diff-viewer .diff-stats-added {
+  color: var(--st-success, #4ade80);
+}
+
+.inline-diff-viewer .diff-stats-removed {
+  color: var(--st-danger, #f87171);
+}
+
+.inline-diff-viewer .diff-content {
+  overflow-x: auto;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.inline-diff-viewer .diff-line {
+  display: flex;
+  white-space: pre;
+  min-height: 20px;
+}
+
+.inline-diff-viewer .diff-line-number {
+  flex-shrink: 0;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--st-text-muted, #666);
+  user-select: none;
+  background: var(--st-surface, #252525);
+}
+
+.inline-diff-viewer .diff-line-sign {
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+  user-select: none;
+}
+
+.inline-diff-viewer .diff-line-content {
+  flex: 1;
+  padding-right: 10px;
+}
+
+/* Context lines - normal style */
+.inline-diff-viewer .diff-line-context {
+  background: transparent;
+  color: var(--st-text, #e0e0e0);
+}
+
+.inline-diff-viewer .diff-line-context .diff-line-sign {
+  color: var(--st-text-muted, #666);
+}
+
+/* Deleted lines - red background */
+.inline-diff-viewer .diff-line-delete {
+  background: color-mix(in srgb, var(--st-danger, #f87171) 15%, var(--st-bg, #1a1a1a));
+  color: var(--st-text, #e0e0e0);
+}
+
+.inline-diff-viewer .diff-line-delete .diff-line-sign {
+  color: var(--st-danger, #f87171);
+  font-weight: bold;
+}
+
+.inline-diff-viewer .diff-line-delete .diff-line-number {
+  background: color-mix(in srgb, var(--st-danger, #f87171) 20%, var(--st-surface, #252525));
+}
+
+/* Inserted lines - green background */
+.inline-diff-viewer .diff-line-insert {
+  background: color-mix(in srgb, var(--st-success, #4ade80) 15%, var(--st-bg, #1a1a1a));
+  color: var(--st-text, #e0e0e0);
+}
+
+.inline-diff-viewer .diff-line-insert .diff-line-sign {
+  color: var(--st-success, #4ade80);
+  font-weight: bold;
+}
+
+.inline-diff-viewer .diff-line-insert .diff-line-number {
+  background: color-mix(in srgb, var(--st-success, #4ade80) 20%, var(--st-surface, #252525));
+}
+
+/* Selection styles */
+.inline-diff-viewer .diff-line-content::selection {
+  background: var(--st-accent, #3b82f6);
+  color: white;
+}
+
+/* Scrollbar styles */
+.inline-diff-viewer .diff-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.inline-diff-viewer .diff-content::-webkit-scrollbar-track {
+  background: var(--st-bg, #1a1a1a);
+}
+
+.inline-diff-viewer .diff-content::-webkit-scrollbar-thumb {
+  background: var(--st-border, #333);
+  border-radius: 4px;
+}
+
+.inline-diff-viewer .diff-content::-webkit-scrollbar-thumb:hover {
+  background: var(--st-text-muted, #666);
+}

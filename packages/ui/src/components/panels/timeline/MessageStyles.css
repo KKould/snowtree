@@ -173,6 +173,13 @@
   background: color-mix(in srgb, var(--st-danger) 10%, #000);
 }
 
+/* Command diff (for Edit tool) */
+.command-diff {
+  margin: 6px 0 0 22px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
 /* Status indicators */
 .status-running {
   color: var(--st-accent, #61afef);

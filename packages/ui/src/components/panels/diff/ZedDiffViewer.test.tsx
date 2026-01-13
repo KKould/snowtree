@@ -307,8 +307,8 @@ index 1234567..abcdefg 100644
     expect(css).not.toContain('td.diff-gutter:first-of-type {');
   });
 
-  it('shows a persistent staged badge for staged hunks', () => {
-    render(
+  it('shows a persistent staged badge for staged hunks via CSS ::after', () => {
+    const { container } = render(
       <ZedDiffViewer
         diff={SAMPLE_DIFF_TWO_HUNKS}
         sessionId="s1"
@@ -316,7 +316,10 @@ index 1234567..abcdefg 100644
         stagedDiff={SAMPLE_DIFF_TWO_HUNKS}
       />
     );
-    expect(screen.getAllByLabelText('Hunk staged').length).toBeGreaterThan(0);
+    const css = container.querySelector('style')?.textContent || '';
+    // Badge is rendered via CSS ::after on first changed row of staged hunks
+    expect(css).toContain('tbody.diff-hunk.st-hunk-status--staged tr.diff-line.st-hunk-row-first td.diff-gutter:first-of-type::after');
+    expect(css).toContain("content: '✓'");
   });
 
   it('renders per-file horizontal scrollers with a global horizontal scrollbar', () => {

@@ -1206,9 +1206,6 @@ export const ZedDiffViewer = forwardRef<ZedDiffViewerHandle, ZedDiffViewerProps>
                         // so we prefer the line *before* the first changed line when available (i.e. the last context
                         // line right above the hunk), otherwise fall back to the first changed line.
                         const firstChangedIdx = changes.findIndex((c) => c.type === 'insert' || c.type === 'delete');
-                        const changedIndices = changes
-                          .map((c, idx) => ((c.type === 'insert' || c.type === 'delete') ? idx : -1))
-                          .filter((idx) => idx >= 0);
                         const anchorChange =
                           firstChangedIdx > 0
                             ? changes[firstChangedIdx - 1]!
@@ -1217,25 +1214,6 @@ export const ZedDiffViewer = forwardRef<ZedDiffViewerHandle, ZedDiffViewerProps>
                               : first;
                         const changeKey = getChangeKey(anchorChange);
 
-                        // Badge element for staged hunks - always placed with anchor for correct positioning
-                        const badgeElement = (!isCommitView && hunkStatus === 'staged' && changedIndices.length > 0) ? (
-                          <div data-testid="diff-hunk-staged-badge-anchor" className="st-diff-hunk-staged-badge-anchor">
-                            <div className="st-hunk-staged-badge-sticky" aria-label="Hunk staged">
-                              <div className="st-hunk-staged-badge" title="Staged" aria-hidden="true">
-                                <svg viewBox="0 0 16 16" width="10" height="10" fill="none">
-                                  <path
-                                    d="M3.5 8.2l2.6 2.6L12.6 4.6"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                  />
-                                </svg>
-                              </div>
-                            </div>
-                          </div>
-                        ) : null;
-
                         const anchorElement: React.ReactElement | null = isCommitView ? null : (
                           <div
                             data-testid="diff-hunk-controls"
@@ -1243,7 +1221,6 @@ export const ZedDiffViewer = forwardRef<ZedDiffViewerHandle, ZedDiffViewerProps>
                             data-hunk-anchor="true"
                             className={`st-diff-hunk-actions-anchor ${statusClass} ${kindClass} ${isFocused ? 'st-hunk-focused' : ''} ${isHovered ? 'st-hunk-hovered' : ''}`}
                           >
-                            {badgeElement}
                           </div>
                         );
 
@@ -1773,33 +1750,27 @@ export const ZedDiffViewer = forwardRef<ZedDiffViewerHandle, ZedDiffViewerProps>
             pointer-events: none;
           }
 
-          /* Persistent staged badge (not hover-only). */
-          /* Sticky wrapper so the badge stays in the left rail while horizontally scrolling. */
-          .st-diff-table .st-hunk-staged-badge-sticky {
-            position: sticky;
-            /* Inside the first gutter, numbers are right-aligned, so a small badge on the left won't cover them. */
-            left: 6px;
-            z-index: 60;
-            width: 0;
-            height: 0;
-            pointer-events: none;
-          }
-          .st-diff-table .st-hunk-staged-badge {
+          /* Persistent staged badge via CSS ::after on first changed row (professional approach). */
+          .st-diff-table tbody.diff-hunk.st-hunk-status--staged tr.diff-line.st-hunk-row-first td.diff-gutter:first-of-type::after {
+            content: '✓';
             position: absolute;
-            /* Position badge at the top of the first changed line */
             top: 3px;
-            transform: none;
-            left: 0;
+            left: 8px;
             width: 14px;
             height: 14px;
             border-radius: 999px;
-            display: inline-flex;
+            display: flex;
             align-items: center;
             justify-content: center;
+            font-size: 9px;
+            font-weight: bold;
+            line-height: 1;
             border: 1px solid color-mix(in srgb, var(--st-hunk-frame-color) 70%, var(--st-border-variant));
             background: color-mix(in srgb, var(--st-hunk-frame-color) 18%, var(--st-surface));
             color: color-mix(in srgb, var(--st-hunk-frame-color) 85%, var(--st-text));
             box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-bg) 60%, transparent);
+            z-index: 61;
+            pointer-events: none;
           }
 
 

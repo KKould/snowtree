@@ -1,7 +1,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Diff, Hunk, getChangeKey, parseDiff, textLinesToHunk, type ChangeData, type DiffType, type HunkData } from 'react-diff-view';
 import 'react-diff-view/style/index.css';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, Plus, Minus, RotateCcw } from 'lucide-react';
 import { API } from '../../../utils/api';
 import { MarkdownPreview } from './MarkdownPreview';
 import { isMarkdownFile } from './utils/fileUtils';
@@ -1042,19 +1042,63 @@ export const ZedDiffViewer = forwardRef<ZedDiffViewerHandle, ZedDiffViewerProps>
                   backgroundColor: 'var(--st-surface)',
                   borderBottom: '1px solid var(--st-border-variant)',
                 }}
+                onMouseEnter={() => setHoveredHunkKey(null)}
               >
                 <div className="st-diff-file-header-content">
                   <span className="st-diff-file-path">{file.path}</span>
-                  {isMarkdownFile(file.path) && fileSources?.[file.path] && (
-                    <button
-                      type="button"
-                      className="st-diff-preview-btn"
-                      onClick={() => togglePreview(file.path)}
-                      title={previewFiles.has(file.path) ? 'Show Diff' : 'Preview'}
-                    >
-                      {previewFiles.has(file.path) ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  )}
+                  <div className="st-diff-file-actions">
+                    {isMarkdownFile(file.path) && fileSources?.[file.path] && (
+                      <button
+                        type="button"
+                        className="st-diff-preview-btn"
+                        onClick={() => togglePreview(file.path)}
+                        title={previewFiles.has(file.path) ? 'Show Diff' : 'Preview'}
+                      >
+                        {previewFiles.has(file.path) ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    )}
+                    {!isCommitView && (() => {
+                      const hasStaged = stagedHunkHeaderBySig.has(file.path);
+                      const hasUnstaged = unstagedHunkHeaderBySig.has(file.path);
+                      const isFullyStaged = hasStaged && !hasUnstaged;
+                      const isFullyUnstaged = !hasStaged && hasUnstaged;
+                      return (
+                        <>
+                          {!isFullyStaged && (
+                            <button
+                              type="button"
+                              className="st-diff-file-action-btn st-diff-file-action-stage"
+                              onClick={() => stageFile(file.path, true, `file:${file.path}`)}
+                              title="Stage file"
+                            >
+                              <Plus size={14} />
+                              <span>Stage</span>
+                            </button>
+                          )}
+                          {!isFullyUnstaged && hasStaged && (
+                            <button
+                              type="button"
+                              className="st-diff-file-action-btn st-diff-file-action-unstage"
+                              onClick={() => stageFile(file.path, false, `file:${file.path}`)}
+                              title="Unstage file"
+                            >
+                              <Minus size={14} />
+                              <span>Unstage</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="st-diff-file-action-btn st-diff-file-action-restore"
+                            onClick={() => restoreFile(file.path, `file:${file.path}`)}
+                            title="Restore file"
+                          >
+                            <RotateCcw size={14} />
+                            <span>Restore</span>
+                          </button>
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
 
@@ -1446,6 +1490,50 @@ export const ZedDiffViewer = forwardRef<ZedDiffViewerHandle, ZedDiffViewerProps>
             background: color-mix(in srgb, var(--st-accent) 15%, transparent);
             border-color: var(--st-accent);
             color: var(--st-text);
+          }
+
+          /* File action buttons container */
+          .st-diff-file-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+          }
+
+          /* File action buttons */
+          .st-diff-file-action-btn {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            background: transparent;
+            border: 1px solid var(--st-border-variant);
+            border-radius: 4px;
+            color: var(--st-text-muted);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+          }
+
+          .st-diff-file-action-btn:hover {
+            background: color-mix(in srgb, var(--st-hover) 60%, transparent);
+            color: var(--st-text);
+          }
+
+          .st-diff-file-action-stage:hover {
+            border-color: var(--st-diff-added-marker);
+            color: var(--st-diff-added-marker);
+          }
+
+          .st-diff-file-action-unstage:hover {
+            border-color: var(--st-diff-modified-marker);
+            color: var(--st-diff-modified-marker);
+          }
+
+          .st-diff-file-action-restore:hover {
+            border-color: var(--st-diff-deleted-marker);
+            color: var(--st-diff-deleted-marker);
           }
 
           /* Ensure headers are sized to the viewport, not to the max-content table width. */

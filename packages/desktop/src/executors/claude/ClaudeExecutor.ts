@@ -230,12 +230,13 @@ export class ClaudeExecutor extends AbstractExecutor {
       const stopReason = message.type === 'assistant' && message.message?.stop_reason;
       cliLogger.info('Claude', panelId, `Parsed JSON: type=${msgType}, stop_reason=${stopReason || 'N/A'}`);
 
-      // Extract session ID if available - emit for panel manager to handle
-      if ('session_id' in message && message.session_id) {
+      // Extract session ID from the init system message only (avoid persisting unrelated IDs).
+      if (message.type === 'system' && message.subtype === 'init' && message.session_id) {
         this.emit('agentSessionId', {
           panelId,
           sessionId,
           agentSessionId: message.session_id,
+          agentCwd: message.cwd,
         });
       }
 
@@ -315,6 +316,21 @@ export class ClaudeExecutor extends AbstractExecutor {
 
       // Not JSON, emit as stdout and log
       cliLogger.info('Claude', panelId, `Non-JSON output: ${trimmed.slice(0, 200)}${trimmed.length > 200 ? '...' : ''}`);
+      // Surface known errors to the UI (timeline/conversation) and clear invalid resume tokens.
+      if (trimmed.startsWith('No conversation found with session ID:')) {
+        try {
+          this.sessionManager.clearPanelAgentSessionId(panelId);
+        } catch {
+          // best-effort
+        }
+        void this.handleNormalizedEntry(panelId, sessionId, {
+          id: `claude:nonjson:${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          entryType: 'assistant_message',
+          content: `Claude CLI: ${trimmed}\n(Resume token cleared; next run will start a new conversation.)`,
+          metadata: { streaming: false, internal: true },
+        });
+      }
       if (trimmed.includes('Error') || trimmed.includes('Failed')) {
         this.logger?.warn(`[Claude] Non-JSON output in stream-json mode (panel=${panelId.slice(0, 8)} session=${sessionId.slice(0, 8)}): ${trimmed.slice(0, 220)}${trimmed.length > 220 ? '…' : ''}`);
         this.maybeEmitInternalWarning(

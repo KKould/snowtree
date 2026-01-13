@@ -273,6 +273,10 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
       // IMPORTANT: PanelManager caches panel state; agent resume tokens are persisted via SessionManager/db.
       // Always read the latest persisted agent session id from the database to preserve conversation context.
       const persistedAgentSessionId = sessionManager.getPanelAgentSessionId(panelId);
+      const persistedAgentCwd = sessionManager.getPanelAgentCwd(panelId);
+      const agentCwdForSpawn = persistedAgentCwd && fs.existsSync(persistedAgentCwd)
+        ? persistedAgentCwd
+        : worktreePath;
 
       if (panel.type === 'claude') {
         const manager = ensureClaudePanelManager();
@@ -287,7 +291,7 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
           const history = sessionManager.getPanelConversationMessages(panelId);
           await manager.continuePanel({
             panelId,
-            worktreePath,
+            worktreePath: agentCwdForSpawn,
             prompt: input,
             conversationHistory: history,
             planMode,

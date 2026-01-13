@@ -1,6 +1,5 @@
 import type { IpcMain } from 'electron';
 import * as fs from 'fs';
-import * as path from 'path';
 import type { AppServices } from './types';
 import { panelManager } from '../../features/panels/PanelManager';
 import { ClaudePanelManager } from '../../features/panels/ai/ClaudePanelManager';
@@ -48,8 +47,7 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
   };
 
   /**
-   * Try to recover worktree path if it was renamed.
-   * If the folder was renamed, also rename the git branch to match.
+   * Try to recover worktree path if it was moved/renamed on disk.
    * Returns the (possibly updated) worktree path, or null if recovery failed.
    */
   async function tryRecoverWorktreePath(sessionId: string): Promise<string | null> {
@@ -84,35 +82,8 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
       // Found the worktree at a new path
       worktreePath = matchingWorktree.path;
 
-      // Extract new folder name to rename git branch
-      const newFolderName = path.basename(worktreePath);
-      let newBranchName: string | null = null;
-
-      if (newFolderName !== worktreeName) {
-        // Folder was renamed, rename git branch to match
-        try {
-          await gitExecutor.run({
-            sessionId,
-            cwd: worktreePath,
-            argv: ['git', 'branch', '-m', worktreeName, newFolderName],
-            op: 'write',
-            recordTimeline: false,
-            throwOnError: true,
-            timeoutMs: 5_000,
-            meta: { source: 'ipc.session', operation: 'rename-branch' },
-          });
-          newBranchName = newFolderName;
-          logger?.info(`[IPC] Renamed git branch: ${worktreeName} -> ${newFolderName}`);
-        } catch (e) {
-          logger?.warn(`[IPC] Failed to rename git branch: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-
-      // Update session with new path and branch name
-      sessionManager.updateSession(sessionId, {
-        worktreePath,
-        worktreeName: newBranchName || worktreeName
-      });
+      // Update session with new path (do not auto-rename the branch; that is a user action).
+      sessionManager.updateSession(sessionId, { worktreePath });
       logger?.info(`[IPC] Recovered worktree path: ${session.worktreePath} -> ${worktreePath}`);
 
       return worktreePath;
@@ -132,7 +103,7 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
 
   ipcMain.handle('sessions:get', async (_event, sessionId: string) => {
     try {
-      // Try to recover worktree path if it was renamed (also renames git branch)
+      // Try to recover worktree path if it was renamed/moved.
       await tryRecoverWorktreePath(sessionId);
 
       const session = sessionManager.getSession(sessionId);

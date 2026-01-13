@@ -106,68 +106,6 @@ const formatSeconds = (durationMs: number): string => {
   return `${seconds.toFixed(1)}s`;
 };
 
-const tokenizeShellLike = (input: string): string[] => {
-  const s = String(input ?? '').trim();
-  if (!s) return [];
-
-  const out: string[] = [];
-  let current = '';
-  let quote: "'" | '"' | null = null;
-  let escape = false;
-
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-
-    if (escape) {
-      current += ch;
-      escape = false;
-      continue;
-    }
-
-    if (ch === '\\') {
-      escape = true;
-      continue;
-    }
-
-    if (quote) {
-      if (ch === quote) {
-        quote = null;
-        continue;
-      }
-      current += ch;
-      continue;
-    }
-
-    if (ch === '"' || ch === "'") {
-      quote = ch as '"' | "'";
-      continue;
-    }
-
-    if (/\s/.test(ch)) {
-      if (current) {
-        out.push(current);
-        current = '';
-      }
-      continue;
-    }
-
-    current += ch;
-  }
-
-  if (current) out.push(current);
-  return out;
-};
-
-const getCommandGroupKey = (command: string): string => {
-  const tokens = tokenizeShellLike(command);
-  if (tokens.length === 0) return '';
-  const first = tokens[0];
-  const second = tokens.length > 1 ? tokens[1] : '';
-  // Use "first token + subcommand" when the second token isn't an option.
-  if (second && !second.startsWith('-')) return `${first} ${second}`;
-  return first;
-};
-
 const getAgentModelLabelFromCommands = (commands: CommandInfo[]): string | null => {
   const modelsByAgent = new Map<'Codex' | 'Claude', Set<string>>();
   for (const c of commands) {
@@ -197,62 +135,6 @@ const getAgentModelLabelFromCommands = (commands: CommandInfo[]): string | null 
   if (arr.length === 0) return agent;
   if (arr.length === 1) return `${agent} ${arr[0]}`;
   return `${agent} ${arr[0]} (+${arr.length - 1})`;
-};
-
-type CommandSummaryRow = {
-  key: string;
-  count: number;
-  done: number;
-  running: number;
-  failed: number;
-  interrupted: number;
-  durationMs: number;
-};
-
-const buildCommandSummary = (commands: CommandInfo[]): CommandSummaryRow[] => {
-  const byKey = new Map<string, CommandSummaryRow>();
-
-  for (const c of commands) {
-    const meta = c.meta || {};
-    const commandCopy = typeof (meta as { commandCopy?: unknown }).commandCopy === 'string'
-      ? String((meta as { commandCopy: string }).commandCopy)
-      : String(c.command ?? '');
-    const key = getCommandGroupKey(commandCopy) || '(unknown)';
-
-    const metaTermination = typeof (meta as { termination?: unknown }).termination === 'string'
-      ? String((meta as { termination: string }).termination)
-      : undefined;
-    const isInterrupted = metaTermination === 'interrupted';
-    const isRunning = c.status === 'started';
-    const isFailed = !isInterrupted && !isRunning && (c.status === 'failed' || (typeof c.exitCode === 'number' && c.exitCode !== 0));
-    const isDone = !isRunning && !isInterrupted && !isFailed;
-
-    const row = byKey.get(key) || {
-      key,
-      count: 0,
-      done: 0,
-      running: 0,
-      failed: 0,
-      interrupted: 0,
-      durationMs: 0,
-    };
-    row.count += 1;
-    if (isRunning) row.running += 1;
-    else if (isInterrupted) row.interrupted += 1;
-    else if (isFailed) row.failed += 1;
-    else if (isDone) row.done += 1;
-    row.durationMs += typeof c.durationMs === 'number' ? c.durationMs : 0;
-
-    byKey.set(key, row);
-  }
-
-  const rows = Array.from(byKey.values());
-  rows.sort((a, b) => {
-    if (b.count !== a.count) return b.count - a.count;
-    if (b.failed !== a.failed) return b.failed - a.failed;
-    return b.durationMs - a.durationMs;
-  });
-  return rows;
 };
 
 // Build timeline items - groups everything between user messages into agent responses
@@ -579,7 +461,6 @@ const AgentResponse: React.FC<{
   const userToggledRef = useRef(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const agentLabel = useMemo(() => getAgentModelLabelFromCommands(commands), [commands]);
-  const commandSummary = useMemo(() => buildCommandSummary(commands), [commands]);
 
   const handleCopy = useCallback(async (text: string, key: string) => {
     try {
@@ -666,32 +547,6 @@ const AgentResponse: React.FC<{
           {/* Collapsible command list */}
           {showCommands && (
             <div className="commands-body">
-              {commandSummary.length > 0 && (
-                <div className="command-summary">
-                  <div className="command-summary-table" role="table" aria-label="Command summary">
-                    <div className="command-summary-row command-summary-header-row">
-                      <span className="command-summary-cell command-summary-cmd">command</span>
-                      <span className="command-summary-cell command-summary-count">x</span>
-                      <span className="command-summary-cell command-summary-done">done</span>
-                      <span className="command-summary-cell command-summary-running">run</span>
-                      <span className="command-summary-cell command-summary-failed">fail</span>
-                      <span className="command-summary-cell command-summary-interrupted">int</span>
-                      <span className="command-summary-cell command-summary-time">time</span>
-                    </div>
-                    {commandSummary.map((row) => (
-                      <div key={row.key} className="command-summary-row">
-                        <span className="command-summary-cell command-summary-cmd" title={row.key}>{row.key}</span>
-                        <span className="command-summary-cell command-summary-count">{row.count}</span>
-                        <span className="command-summary-cell command-summary-done">{row.done || ''}</span>
-                        <span className="command-summary-cell command-summary-running">{row.running || ''}</span>
-                        <span className="command-summary-cell command-summary-failed">{row.failed || ''}</span>
-                        <span className="command-summary-cell command-summary-interrupted">{row.interrupted || ''}</span>
-                        <span className="command-summary-cell command-summary-time">{row.durationMs > 0 ? formatSeconds(row.durationMs) : ''}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
               {commands.map((c, idx) => {
                 const display = String(c.command ?? '');
                 const key = `${idx}-${display}`;

@@ -92,64 +92,6 @@
   padding: 8px 12px;
 }
 
-/* Command summary (aggregated counts) */
-.command-summary {
-  margin: 4px 0 10px;
-}
-
-.command-summary-table {
-  display: grid;
-  gap: 2px;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 0.75rem;
-  color: color-mix(in srgb, var(--st-text) 70%, transparent);
-}
-
-.command-summary-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) 32px 44px 44px 44px 44px 56px;
-  gap: 8px;
-  padding: 4px 6px;
-  border-radius: 4px;
-}
-
-.command-summary-row:hover {
-  background: color-mix(in srgb, var(--st-surface) 16%, transparent);
-}
-
-.command-summary-header-row {
-  color: color-mix(in srgb, var(--st-text) 55%, transparent);
-  padding-top: 2px;
-  padding-bottom: 6px;
-}
-
-.command-summary-cell {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.command-summary-count,
-.command-summary-done,
-.command-summary-running,
-.command-summary-failed,
-.command-summary-interrupted,
-.command-summary-time {
-  text-align: right;
-}
-
-.command-summary-running {
-  color: var(--st-accent);
-}
-
-.command-summary-failed {
-  color: var(--st-danger);
-}
-
-.command-summary-interrupted {
-  color: var(--st-warning, #f59e0b);
-}
-
 /* Command item */
 .command-item {
   display: flex;

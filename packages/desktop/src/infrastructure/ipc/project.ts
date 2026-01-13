@@ -1,8 +1,6 @@
 import type { IpcMain } from 'electron';
 import type { AppServices } from './types';
 import { randomUUID } from 'crypto';
-import { dirname, join } from 'path';
-import { symlink } from 'fs/promises';
 
 type CreateProjectRequest = {
   name: string;
@@ -156,42 +154,46 @@ export function registerProjectHandlers(ipcMain: IpcMain, services: AppServices)
       if (!name) return { success: false, error: 'Name is required' };
       if (/[\\/]/.test(name)) return { success: false, error: 'Name cannot contain path separators' };
 
-      const parentDir = dirname(normalizedWorktreePath);
-      const nextPath = join(parentDir, name);
-      if (nextPath.replace(/\/+$/, '') === normalizedWorktreePath) return { success: true };
+      // "Safe rename": rename the git branch (workspace identity) without moving the worktree folder.
+      // Moving the worktree path can break agent resume tokens that are keyed by cwd.
+      const { stdout: branchOut } = await gitExecutor.run({
+        sessionId,
+        cwd: normalizedWorktreePath,
+        argv: ['git', 'rev-parse', '--abbrev-ref', 'HEAD'],
+        kind: 'git.command',
+        op: 'read',
+        meta: { source: 'workspace', operation: 'worktree-branch-probe', worktreePath: normalizedWorktreePath },
+      });
+      const currentBranch = branchOut.trim();
+      if (!currentBranch || currentBranch === 'HEAD') {
+        return { success: false, error: 'Cannot rename a detached worktree (no branch checked out)' };
+      }
+      if (currentBranch === name) {
+        return { success: true, data: { path: normalizedWorktreePath } };
+      }
 
       await gitExecutor.run({
         sessionId,
-        cwd: project.path,
-        argv: ['git', 'worktree', 'move', normalizedWorktreePath, nextPath],
-        kind: 'worktree.command',
+        cwd: normalizedWorktreePath,
+        argv: ['git', 'branch', '-m', currentBranch, name],
+        kind: 'git.command',
         op: 'write',
-        meta: { source: 'workspace', operation: 'worktree-move', worktreePath: normalizedWorktreePath, nextPath },
+        meta: { source: 'workspace', operation: 'branch-rename', worktreePath: normalizedWorktreePath, from: currentBranch, to: name },
       });
 
-      // Create a symlink from old path to new path so running agents can continue working.
-      // This allows agents that are already running with cwd=oldPath to still access files.
-      try {
-        await symlink(nextPath, normalizedWorktreePath);
-        console.log(`[IPC] Created symlink for worktree rename: ${normalizedWorktreePath} -> ${nextPath}`);
-      } catch (symlinkError) {
-        // Symlink creation is best-effort; log but don't fail the rename
-        console.warn(`[IPC] Failed to create symlink for worktree rename: ${symlinkError instanceof Error ? symlinkError.message : String(symlinkError)}`);
-      }
-
-      // Update any sessions attached to this worktree path so open-worktree continues to resolve.
+      // Update any sessions attached to this worktree path so worktree recovery and display stay consistent.
       const sessions = databaseService.getAllSessionsIncludingArchived().filter(
         (s) => s.project_id === projectId && s.worktree_path?.replace(/\/+$/, '') === normalizedWorktreePath
       );
       for (const s of sessions) {
         try {
-          sessionManager.updateSession(s.id, { worktreePath: nextPath, worktreeName: name });
+          sessionManager.updateSession(s.id, { worktreeName: name });
         } catch {
           // ignore
         }
       }
 
-      return { success: true, data: { path: nextPath } };
+      return { success: true, data: { path: normalizedWorktreePath } };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Failed to rename worktree' };
     }

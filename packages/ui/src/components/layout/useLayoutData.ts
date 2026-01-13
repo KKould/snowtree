@@ -32,6 +32,8 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
   const [loadError, setLoadError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
   const [reloadToken, setReloadToken] = useState(0);
+  const branchPollTimerRef = useRef<number | null>(null);
+  const branchPollInFlightRef = useRef(false);
 
   // Derive executionMode from aiPanel state
   const executionMode = useMemo<ExecutionMode>(() => {
@@ -125,24 +127,62 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
       }
     };
 
-    const loadBranch = async () => {
-      try {
-        const response = await withTimeout(API.sessions.getGitCommands(sessionId), 10_000, 'Load branch');
-        if (requestId !== requestIdRef.current) return;
-        if (response.success && response.data) {
-          setBranchName(response.data.currentBranch || 'main');
-        }
-      } catch (error) {
-        console.error('Failed to load branch:', error);
-      }
-    };
-
-    Promise.allSettled([loadSession(), loadPanels(), loadBranch()]).finally(() => {
+    Promise.allSettled([loadSession(), loadPanels()]).finally(() => {
       if (requestId === requestIdRef.current) {
         setIsLoadingSession(false);
       }
     });
   }, [sessionId, reloadToken]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+
+    if (branchPollTimerRef.current) {
+      window.clearInterval(branchPollTimerRef.current);
+      branchPollTimerRef.current = null;
+    }
+
+    let cancelled = false;
+
+    const pollBranch = async () => {
+      if (cancelled) return;
+      if (document.visibilityState !== 'visible') return;
+      if (branchPollInFlightRef.current) return;
+
+      branchPollInFlightRef.current = true;
+      try {
+        const response = await withTimeout(API.sessions.getGitCommands(sessionId), 8_000, 'Load branch');
+        if (cancelled) return;
+        if (response.success && response.data) {
+          const next = String(response.data.currentBranch || '').trim();
+          if (next) setBranchName((prev) => (prev === next ? prev : next));
+        }
+      } catch {
+        // best-effort; branch polling should never break the UI
+      } finally {
+        branchPollInFlightRef.current = false;
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void pollBranch();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    void pollBranch();
+
+    branchPollTimerRef.current = window.setInterval(pollBranch, 2_000);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (branchPollTimerRef.current) {
+        window.clearInterval(branchPollTimerRef.current);
+        branchPollTimerRef.current = null;
+      }
+      branchPollInFlightRef.current = false;
+    };
+  }, [sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;

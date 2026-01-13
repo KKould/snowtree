@@ -55,6 +55,12 @@ export function Sidebar() {
   const sidebarPollingTimerRef = useRef<number | null>(null);
   const worktreePollInFlightRef = useRef<Set<number>>(new Set());
 
+  const getWorktreeDisplayName = useCallback((worktree: Worktree): string => {
+    const branch = typeof worktree.branch === 'string' ? worktree.branch.trim() : '';
+    if (branch) return branch;
+    return worktree.path.split('/').filter(Boolean).pop() || worktree.path;
+  }, []);
+
   const loadProjects = useCallback(async () => {
     const res = await API.projects.getAll();
     if (res.success && Array.isArray(res.data)) {
@@ -466,12 +472,12 @@ export function Sidebar() {
   }, [sessions]);
 
   const beginRenameWorktree = useCallback((worktree: Worktree, sessionId: string | null) => {
-    const leafName = worktree.path.split('/').filter(Boolean).pop() || worktree.path;
+    const displayName = getWorktreeDisplayName(worktree);
     hasInitializedRenameInputRef.current = false;
     setEditingWorktreePath(worktree.path);
     setEditingWorktreeSessionId(sessionId);
-    setDraftWorktreeName(leafName);
-  }, []);
+    setDraftWorktreeName(displayName);
+  }, [getWorktreeDisplayName]);
 
   const cancelRenameWorktree = useCallback(() => {
     setEditingWorktreePath(null);
@@ -491,16 +497,11 @@ export function Sidebar() {
         showError({ title: 'Failed to Rename Workspace', error: res.error || 'Could not rename worktree' });
         return;
       }
-      const nextPath = typeof (res.data as { path?: unknown } | undefined)?.path === 'string'
-        ? (res.data as { path: string }).path
-        : null;
-      if (nextPath) {
-        setWorktreesByProjectId((prev) => ({
-          ...prev,
-          [project.id]: (prev[project.id] || []).map((w) => w.path === worktree.path ? { ...w, path: nextPath } : w),
-        }));
-        setPendingSelectedWorktreePath((prev) => prev === worktree.path ? nextPath : prev);
-      }
+      // Optimistically update the branch/name so the UI reflects the rename immediately.
+      setWorktreesByProjectId((prev) => ({
+        ...prev,
+        [project.id]: (prev[project.id] || []).map((w) => w.path === worktree.path ? { ...w, branch: nextName } : w),
+      }));
       cancelRenameWorktree();
       void loadWorktrees(project, { silent: true });
     } catch (error) {
@@ -636,7 +637,7 @@ export function Sidebar() {
                                 (activeWorktreePath && activeWorktreePath === worktree.path) ||
                                 (pendingSelectedWorktreePath && pendingSelectedWorktreePath === worktree.path)
                               );
-                              const leafName = worktree.path.split('/').filter(Boolean).pop() || worktree.path;
+                              const displayName = getWorktreeDisplayName(worktree);
                               const isEditing = editingWorktreePath === worktree.path;
                               const isRunning = runningWorktreePaths.has(worktree.path);
                               return (
@@ -709,9 +710,9 @@ export function Sidebar() {
                                                 data-testid="worktree-name"
                                                 className="text-[12px] truncate"
                                                 style={{ color: 'var(--st-text)' }}
-                                                title={`${leafName} (double-click to rename)`}
+                                                title={`${displayName} (double-click to rename)`}
                                               >
-                                                {leafName}
+                                                {displayName}
                                               </span>
                                               {isRunning && (
                                                 <Loader2

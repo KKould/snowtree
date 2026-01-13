@@ -248,17 +248,54 @@ export class SessionManager extends EventEmitter {
     try {
       const panel = this.db.getPanel(panelId);
       const customState = panel?.state?.customState as BaseAIPanelState | undefined;
-      // Check new field first, then fall back to legacy fields based on panel type
-      const agentSessionId = customState?.agentSessionId || 
-                             customState?.claudeSessionId || 
-                             customState?.codexSessionId;
-      return agentSessionId;
+      const agentSessionId = typeof customState?.agentSessionId === 'string' ? customState.agentSessionId : '';
+      if (agentSessionId.trim().length > 0) return agentSessionId;
+
+      // Back-compat: infer legacy field by panel type (keeps this modular for future agents).
+      if (panel?.type === 'claude' && typeof (customState as BaseAIPanelState | undefined)?.claudeSessionId === 'string') {
+        const v = String((customState as BaseAIPanelState).claudeSessionId || '').trim();
+        return v || undefined;
+      }
+      if (panel?.type === 'codex' && typeof (customState as BaseAIPanelState | undefined)?.codexSessionId === 'string') {
+        const v = String((customState as BaseAIPanelState).codexSessionId || '').trim();
+        return v || undefined;
+      }
+      return undefined;
     } catch (e) {
       return undefined;
     }
   }
 
-  persistPanelAgentSessionId(panelId: string, agentSessionId: string, tool?: 'claude' | 'codex'): void {
+  getPanelAgentCwd(panelId: string): string | undefined {
+    try {
+      const panel = this.db.getPanel(panelId);
+      const customState = panel?.state?.customState as (BaseAIPanelState & { agentCwd?: string }) | undefined;
+      const agentCwd = customState?.agentCwd;
+      return typeof agentCwd === 'string' && agentCwd.trim().length > 0 ? agentCwd : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  clearPanelAgentSessionId(panelId: string): void {
+    try {
+      const panel = this.db.getPanel(panelId);
+      if (!panel) return;
+      const currentState = (panel.state as PanelStateWithCustomData) || {};
+      const customState = { ...(((currentState.customState as Record<string, unknown> | undefined) || {})) };
+
+      delete customState.agentSessionId;
+      delete customState.claudeSessionId;
+      delete customState.codexSessionId;
+
+      const updatedState = { ...currentState, customState };
+      this.db.updatePanel(panelId, { state: updatedState });
+    } catch {
+      // best-effort
+    }
+  }
+
+  persistPanelAgentSessionId(panelId: string, agentSessionId: string, options?: { agentCwd?: string }): void {
     try {
       const panel = this.db.getPanel(panelId);
       if (!panel) return;
@@ -266,8 +303,11 @@ export class SessionManager extends EventEmitter {
       const customState = (currentState.customState as Record<string, unknown> | undefined) || {};
 
       const nextCustomState: Record<string, unknown> = { ...customState, agentSessionId };
-      if (tool === 'claude') nextCustomState.claudeSessionId = agentSessionId;
-      if (tool === 'codex') nextCustomState.codexSessionId = agentSessionId;
+      // Back-compat: mirror into legacy fields based on panel type (no hardcoded tool list).
+      if (panel.type === 'claude') nextCustomState.claudeSessionId = agentSessionId;
+      if (panel.type === 'codex') nextCustomState.codexSessionId = agentSessionId;
+      const agentCwd = options?.agentCwd;
+      if (typeof agentCwd === 'string' && agentCwd.trim().length > 0) nextCustomState.agentCwd = agentCwd;
 
       const updatedState = { ...currentState, customState: nextCustomState };
       this.db.updatePanel(panelId, { state: updatedState });

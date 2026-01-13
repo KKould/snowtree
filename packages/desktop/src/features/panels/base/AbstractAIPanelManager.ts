@@ -108,15 +108,16 @@ export abstract class AbstractAIPanelManager {
     });
 
     // Handle agent session ID updates
-    this.executor.on('agentSessionId', (data: { panelId: string; sessionId: string; agentSessionId: string }) => {
-      const { panelId, agentSessionId } = data;
+    this.executor.on('agentSessionId', (data: { panelId: string; sessionId: string; agentSessionId: string; agentCwd?: string }) => {
+      const { panelId, agentSessionId, agentCwd } = data;
       const mapping = this.panelMappings.get(panelId);
       if (mapping) {
         mapping.agentSessionId = agentSessionId;
         this.logger?.verbose(`[${this.getAgentName()}PanelManager] Updated agent session ID for panel ${panelId}: ${agentSessionId}`);
         try {
-          const tool = this.getAgentName().toLowerCase() === 'codex' ? 'codex' : this.getAgentName().toLowerCase() === 'claude' ? 'claude' : undefined;
-          this.sessionManager.persistPanelAgentSessionId(panelId, agentSessionId, tool as 'claude' | 'codex' | undefined);
+          this.sessionManager.persistPanelAgentSessionId(panelId, agentSessionId, {
+            agentCwd: typeof agentCwd === 'string' ? agentCwd : undefined,
+          });
         } catch {
           // best-effort
         }

@@ -5,7 +5,7 @@ import { API } from '../../utils/api';
 import { withTimeout } from '../../utils/withTimeout';
 import type { TimelineEvent } from '../../types/timeline';
 
-const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/tiff'];
 
 const BlockCursor: React.FC<{
   editorRef: React.RefObject<HTMLDivElement | null>;

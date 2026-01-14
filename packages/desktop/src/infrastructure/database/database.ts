@@ -233,7 +233,8 @@ export class DatabaseService {
 
     // Add last_viewed_at column if it doesn't exist
     if (!hasLastViewedAtColumn) {
-      this.db.prepare("ALTER TABLE sessions ADD COLUMN last_viewed_at TEXT").run();
+      // Use DATETIME declared type to avoid triggering timestamp-normalization migrations on fresh DBs.
+      this.db.prepare("ALTER TABLE sessions ADD COLUMN last_viewed_at DATETIME").run();
     }
 
     // Add commit_message column to execution_diffs if it doesn't exist
@@ -1358,6 +1359,41 @@ export class DatabaseService {
 
     // Add new columns to support thinking, tool_use, tool_result, and user_question events
     this.migrateTimelineExtendedFields();
+
+    // Final safety pass: some migrations recreate the `sessions` table; ensure critical columns exist.
+    this.ensureSessionsTableColumns();
+  }
+
+  private ensureSessionsTableColumns(): void {
+    interface SqliteTableInfo {
+      cid: number;
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: unknown;
+      pk: number;
+    }
+
+    const columns = this.db.prepare("PRAGMA table_info(sessions)").all() as SqliteTableInfo[];
+    const existing = new Set(columns.map((col) => col.name));
+
+    const addColumnBestEffort = (sql: string, columnName: string) => {
+      try {
+        this.db.prepare(sql).run();
+        console.log(`[Database] Added missing ${columnName} column to sessions table`);
+      } catch (error) {
+        // Best-effort: don't block startup; logs help diagnose DBs in the wild.
+        console.warn(`[Database] Failed to add missing ${columnName} column to sessions table:`, error);
+      }
+    };
+
+    if (!existing.has('status_message')) {
+      addColumnBestEffort("ALTER TABLE sessions ADD COLUMN status_message TEXT", 'status_message');
+    }
+
+    if (!existing.has('run_started_at')) {
+      addColumnBestEffort("ALTER TABLE sessions ADD COLUMN run_started_at DATETIME", 'run_started_at');
+    }
   }
 
   private migrateTimelineMaskedPrompts(): void {

@@ -236,16 +236,38 @@ export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): vo
       const session = sessionManager.getSession(sessionId);
       if (!session?.worktreePath) return { success: false, error: 'Session worktree not found' };
 
-      const { stdout } = await gitExecutor.run({
-        sessionId,
-        cwd: session.worktreePath,
-        argv: ['git', 'branch', '--show-current'],
-        op: 'read',
-        meta: { source: 'ipc.git', operation: 'current-branch' },
-      });
-      const currentBranch = stdout.trim();
+      // Run branch and tracking remote queries in parallel
+      const [branchRes, trackingRes] = await Promise.all([
+        gitExecutor.run({
+          sessionId,
+          cwd: session.worktreePath,
+          argv: ['git', 'branch', '--show-current'],
+          op: 'read',
+          meta: { source: 'ipc.git', operation: 'current-branch' },
+        }),
+        gitExecutor.run({
+          sessionId,
+          cwd: session.worktreePath,
+          argv: ['git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}'],
+          op: 'read',
+          throwOnError: false,
+          meta: { source: 'ipc.git', operation: 'tracking-remote' },
+        }),
+      ]);
 
-      return { success: true, data: { currentBranch } };
+      const currentBranch = branchRes.stdout.trim();
+
+      // Parse remote name from tracking branch (e.g., "origin/main" -> "origin")
+      let remoteName: string | null = null;
+      if (trackingRes.exitCode === 0 && trackingRes.stdout.trim()) {
+        const trackingBranch = trackingRes.stdout.trim();
+        const slashIndex = trackingBranch.indexOf('/');
+        if (slashIndex > 0) {
+          remoteName = trackingBranch.substring(0, slashIndex);
+        }
+      }
+
+      return { success: true, data: { currentBranch, remoteName } };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : 'Failed to load git commands' };
     }

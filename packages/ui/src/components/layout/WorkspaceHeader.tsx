@@ -50,7 +50,8 @@ StatusDot.displayName = 'StatusDot';
 
 export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = React.memo(({
   session,
-  branchName
+  branchName,
+  remoteName
 }) => {
   const repositoryName = useMemo(() => {
     return getRepositoryName(session.worktreePath) || session.name;
@@ -95,7 +96,9 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = React.memo(({
           }}
         >
           <GitBranch className="w-3 h-3" />
-          <span className="truncate max-w-[120px]" data-testid="branch-name">{branchName || 'main'}</span>
+          <span className="truncate max-w-[180px]" data-testid="branch-name">
+            {remoteName ? `${remoteName}/${branchName || 'main'}` : branchName || 'main'}
+          </span>
         </div>
       </div>
 

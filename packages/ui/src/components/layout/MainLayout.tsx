@@ -64,6 +64,7 @@ export const MainLayout: React.FC = React.memo(() => {
     session,
     aiPanel,
     branchName,
+    remoteName,
     selectedTool,
     isProcessing,
     isLoadingSession,
@@ -442,6 +443,7 @@ export const MainLayout: React.FC = React.memo(() => {
         <WorkspaceHeader
           session={displaySession}
           branchName={branchName}
+          remoteName={remoteName}
         />
 
         {session ? (

@@ -18,6 +18,7 @@ export interface FileChange {
 export interface WorkspaceHeaderProps {
   session: Session;
   branchName: string;
+  remoteName: string | null;
 }
 
 export interface PendingMessage {

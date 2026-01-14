@@ -9,6 +9,7 @@ interface UseLayoutDataResult {
   session: Session | null;
   aiPanel: ToolPanel | null;
   branchName: string;
+  remoteName: string | null;
   selectedTool: CLITool;
   isProcessing: boolean;
   isLoadingSession: boolean;
@@ -29,6 +30,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
   const [aiPanel, setAiPanel] = useState<ToolPanel | null>(null);
   const aiPanelRef = useRef<ToolPanel | null>(null);
   const [branchName, setBranchName] = useState<string>('main');
+  const [remoteName, setRemoteName] = useState<string | null>(null);
   const [selectedTool, setSelectedTool] = useState<CLITool>('claude');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
@@ -112,6 +114,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
     setSession(null);
     setAiPanel(null);
     setBranchName('main');
+    setRemoteName(null);
     setLoadError(null);
     setIsProcessing(false);
     setIsLoadingSession(true);
@@ -182,8 +185,11 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
         const response = await withTimeout(API.sessions.getGitCommands(sessionId), 8_000, 'Load branch');
         if (cancelled) return;
         if (response.success && response.data) {
-          const next = String(response.data.currentBranch || '').trim();
-          if (next) setBranchName((prev) => (prev === next ? prev : next));
+          const nextBranch = String(response.data.currentBranch || '').trim();
+          if (nextBranch) setBranchName((prev) => (prev === nextBranch ? prev : nextBranch));
+
+          const nextRemote = response.data.remoteName ?? null;
+          setRemoteName((prev) => (prev === nextRemote ? prev : nextRemote));
         }
       } catch {
         // best-effort; branch polling should never break the UI
@@ -358,6 +364,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
     session,
     aiPanel,
     branchName,
+    remoteName,
     selectedTool,
     isProcessing,
     isLoadingSession,

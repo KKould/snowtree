@@ -418,7 +418,8 @@ export function Sidebar() {
     };
 
     void pollCIStatus();
-    const interval = window.setInterval(() => { void pollCIStatus(); }, 5_000);
+    // Poll every 30 seconds to avoid hitting GitHub API rate limits
+    const interval = window.setInterval(() => { void pollCIStatus(); }, 30_000);
 
     return () => window.clearInterval(interval);
   }, [sessions]);

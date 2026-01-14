@@ -73,7 +73,8 @@ export interface RightPanelData {
 }
 
 const REQUEST_TIMEOUT = 15_000;
-const PR_POLL_INTERVAL_MS = 3_000;
+const PR_POLL_INTERVAL_MS = 5_000;
+const CI_POLL_INTERVAL_MS = 30_000; // CI status polls less frequently to avoid GitHub API rate limits
 const BRANCH_SYNC_POLL_INTERVAL_MS = 3_000;
 
 const toEpochMs = (timestamp: string) => {
@@ -144,6 +145,8 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
   const lastGitStatusSignatureRef = useRef<string | null>(null);
   const prPollingTimerRef = useRef<number | null>(null);
   const prPollingAbortRef = useRef<AbortController | null>(null);
+  const ciPollingTimerRef = useRef<number | null>(null);
+  const ciPollingAbortRef = useRef<AbortController | null>(null);
   const branchSyncPollingTimerRef = useRef<number | null>(null);
   const branchSyncPollingAbortRef = useRef<AbortController | null>(null);
 
@@ -527,16 +530,6 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
           // No change
           return current;
         });
-
-        // Fetch CI status alongside PR status (only when PR exists)
-        if (newPR) {
-          const newCIStatus = await fetchCIStatus();
-          if (!controller.signal.aborted) {
-            setCIStatus(newCIStatus);
-          }
-        } else {
-          setCIStatus(null);
-        }
       } catch (error) {
         void error;
         // Ignore polling errors to avoid spamming
@@ -561,7 +554,56 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
       prPollingAbortRef.current?.abort();
       prPollingAbortRef.current = null;
     };
-  }, [sessionId, fetchRemotePullRequest, fetchCIStatus]);
+  }, [sessionId, fetchRemotePullRequest]);
+
+  // Poll CI status separately with longer interval to avoid GitHub API rate limits
+  useEffect(() => {
+    if (!sessionId) {
+      if (ciPollingTimerRef.current) {
+        window.clearInterval(ciPollingTimerRef.current);
+        ciPollingTimerRef.current = null;
+      }
+      setCIStatus(null);
+      return;
+    }
+
+    const pollCIStatus = async () => {
+      if (document.visibilityState !== 'visible') return;
+
+      ciPollingAbortRef.current?.abort();
+      const controller = new AbortController();
+      ciPollingAbortRef.current = controller;
+
+      try {
+        const newCIStatus = await fetchCIStatus();
+        if (!controller.signal.aborted) {
+          setCIStatus(newCIStatus);
+        }
+      } catch (error) {
+        void error;
+        // Ignore polling errors
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') void pollCIStatus();
+    };
+
+    // Start polling immediately and then periodically
+    void pollCIStatus();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    ciPollingTimerRef.current = window.setInterval(pollCIStatus, CI_POLL_INTERVAL_MS);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (ciPollingTimerRef.current) {
+        window.clearInterval(ciPollingTimerRef.current);
+        ciPollingTimerRef.current = null;
+      }
+      ciPollingAbortRef.current?.abort();
+      ciPollingAbortRef.current = null;
+    };
+  }, [sessionId, fetchCIStatus]);
 
   // Poll branch sync status periodically (requires fetch)
   useEffect(() => {

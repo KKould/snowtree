@@ -2,8 +2,6 @@
 
 Snowtree is Databend Labs' review-driven workflow for keeping AI coding sessions safe, auditable, and merge-ready.
 
-> 📦 **New home:** The project is moving from the personal `bohutang` org to [`databendlabs/snowtree`](https://github.com/databendlabs/snowtree). All new issues/releases will live there.
-
 AI generates code. You must review. You can't review everything or roll back safely.  
 Snowtree fixes this with **worktree isolation**, **incremental review**, and **staging snapshots**.
 

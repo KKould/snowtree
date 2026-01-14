@@ -36,7 +36,7 @@ describe('useLayoutData', () => {
       success: true,
       data: { id: 's1', name: 's1', status: 'waiting', createdAt: new Date().toISOString(), toolType: 'claude' },
     });
-    (API.sessions.getGitCommands as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { currentBranch: 'main' } });
+    (API.sessions.getGitCommands as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true, data: { currentBranch: 'main', remoteName: 'origin' } });
     (API.sessions.stop as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
 
     (globalThis as unknown as { window: Window & typeof globalThis }).window.electronAPI = {

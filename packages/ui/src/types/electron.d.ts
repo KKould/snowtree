@@ -100,7 +100,7 @@ export interface ElectronAPI {
     getTimeline: (sessionId: string) => Promise<IPCResponse<TimelineEvent[]>>;
     getExecutions: (sessionId: string) => Promise<IPCResponse<ExecutionDTO[]>>;
     getDiff: (sessionId: string, target: DiffTarget) => Promise<IPCResponse<GitDiffResultDTO>>;
-    getGitCommands: (sessionId: string) => Promise<IPCResponse<{ currentBranch: string }>>;
+    getGitCommands: (sessionId: string) => Promise<IPCResponse<{ currentBranch: string; remoteName: string | null }>>;
     getRemotePullRequest: (sessionId: string) => Promise<IPCResponse<RemotePullRequestDTO | null>>;
     getFileContent: (sessionId: string, options: { filePath: string; ref: 'HEAD' | 'INDEX' | 'WORKTREE' | string; maxBytes?: number }) => Promise<IPCResponse<{ content: string }>>;
     stageHunk: (sessionId: string, options: {

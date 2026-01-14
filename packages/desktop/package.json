@@ -8,7 +8,7 @@
     "@snowtree/core": "workspace:*"
   },
   "scripts": {
-    "dev": "tsc -w",
+    "dev": "npm run copy:assets && tsc -w",
     "build": "rimraf dist && tsc && npm run copy:assets",
     "copy:assets": "mkdirp dist/infrastructure/database/migrations dist/windows dist/assets && cp src/infrastructure/database/*.sql dist/infrastructure/database/ && cp src/infrastructure/database/migrations/*.sql dist/infrastructure/database/migrations/ && cp src/windows/*.html dist/windows/ && cp assets/snowtree-logo.png dist/assets/",
     "lint": "eslint src --ext .ts",

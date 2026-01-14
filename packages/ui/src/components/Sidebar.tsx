@@ -222,6 +222,14 @@ export function Sidebar() {
     }
   }, [appVersion]);
 
+  const handleOpenDatabend = useCallback(async () => {
+    try {
+      await window.electronAPI?.invoke?.('shell:openExternal', 'https://github.com/databendlabs/databend');
+    } catch {
+      // ignore
+    }
+  }, []);
+
 
   const handleAddRepository = useCallback(async () => {
     try {
@@ -831,6 +839,17 @@ export function Sidebar() {
             )}
           </button>
         </div>
+        <button
+          type="button"
+          onClick={handleOpenDatabend}
+          className="text-[10px] px-2 py-1 rounded transition-colors st-hoverable st-focus-ring flex items-center gap-1 whitespace-nowrap overflow-hidden"
+          style={{ color: 'var(--st-text-muted)' }}
+          title="Open Databend Labs on GitHub"
+        >
+          <span className="truncate text-left">
+            Made by Databend Team · <span style={{ color: 'var(--st-text-faint)' }}>github.com/databendlabs/databend</span>
+          </span>
+        </button>
         {updateError && (
           <div className="text-[10px] leading-snug" style={{ color: 'var(--st-text-muted)' }}>
             {updateError}

@@ -6,6 +6,8 @@ import { useSessionStore } from '../stores/sessionStore';
 import { formatDistanceToNow } from '../utils/timestampUtils';
 import { StageBadge } from './layout/StageBadge';
 import { useThemeStore } from '../stores/themeStore';
+import { SidebarCIStatus, getCIStatus } from '../features/ci-status';
+import type { CIStatus } from '../features/ci-status';
 
 type Project = {
   id: number;
@@ -54,6 +56,8 @@ export function Sidebar() {
   const [updateError, setUpdateError] = useState<string>('');
   const sidebarPollingTimerRef = useRef<number | null>(null);
   const worktreePollInFlightRef = useRef<Set<number>>(new Set());
+  const [ciStatusBySessionId, setCIStatusBySessionId] = useState<Record<string, CIStatus | null>>({});
+  const ciStatusPollInFlightRef = useRef<Set<string>>(new Set());
 
   const getWorktreeDisplayName = useCallback((worktree: Worktree): string => {
     const branch = typeof worktree.branch === 'string' ? worktree.branch.trim() : '';
@@ -393,6 +397,31 @@ export function Sidebar() {
       }
     };
   }, [projects, collapsedProjects, loadWorktrees]);
+
+  // Poll CI status for all sessions with worktrees
+  useEffect(() => {
+    const pollCIStatus = async () => {
+      if (document.visibilityState !== 'visible') return;
+
+      for (const session of sessions) {
+        if (!session.worktreePath || !session.id) continue;
+        if (ciStatusPollInFlightRef.current.has(session.id)) continue;
+
+        ciStatusPollInFlightRef.current.add(session.id);
+        try {
+          const status = await getCIStatus(session.id);
+          setCIStatusBySessionId(prev => ({ ...prev, [session.id]: status }));
+        } finally {
+          ciStatusPollInFlightRef.current.delete(session.id);
+        }
+      }
+    };
+
+    void pollCIStatus();
+    const interval = window.setInterval(() => { void pollCIStatus(); }, 5_000);
+
+    return () => window.clearInterval(interval);
+  }, [sessions]);
 
   const activeSession = useMemo(() => sessions.find((s) => s.id === activeSessionId) || null, [sessions, activeSessionId]);
   const activeWorktreePath = activeSession?.worktreePath || null;
@@ -743,25 +772,38 @@ export function Sidebar() {
                                           </div>
                                         )}
                                       </div>
-                                      <div className="flex items-center gap-1 text-[11px] font-mono flex-shrink-0">
-                                        {(worktree.additions > 0 || worktree.deletions > 0) && (
-                                          <span className="flex items-center gap-0.5">
-                                            {worktree.additions > 0 && (
-                                              <span style={{ color: '#98c379' }}>+{worktree.additions}</span>
+                                      {(() => {
+                                        const session = sessionsByWorktreePath.get(worktree.path);
+                                        const ciStatus = session?.id ? ciStatusBySessionId[session.id] : null;
+
+                                        // If we have CI status, show it instead of diff
+                                        if (ciStatus && ciStatus.totalCount > 0) {
+                                          return <SidebarCIStatus ciStatus={ciStatus} />;
+                                        }
+
+                                        // Otherwise show diff stats
+                                        return (
+                                          <div className="flex items-center gap-1 text-[11px] font-mono flex-shrink-0">
+                                            {(worktree.additions > 0 || worktree.deletions > 0) && (
+                                              <span className="flex items-center gap-0.5">
+                                                {worktree.additions > 0 && (
+                                                  <span style={{ color: '#98c379' }}>+{worktree.additions}</span>
+                                                )}
+                                                {worktree.deletions > 0 && (
+                                                  <span style={{ color: '#e06c75' }}> -{worktree.deletions}</span>
+                                                )}
+                                              </span>
                                             )}
-                                            {worktree.deletions > 0 && (
-                                              <span style={{ color: '#e06c75' }}> -{worktree.deletions}</span>
+                                            {worktree.hasChanges && worktree.additions === 0 && worktree.deletions === 0 && (
+                                              <span
+                                                className="w-1.5 h-1.5 rounded-full"
+                                                style={{ backgroundColor: 'var(--st-accent)' }}
+                                                title="Has changes"
+                                              />
                                             )}
-                                          </span>
-                                        )}
-                                        {worktree.hasChanges && worktree.additions === 0 && worktree.deletions === 0 && (
-                                          <span
-                                            className="w-1.5 h-1.5 rounded-full"
-                                            style={{ backgroundColor: 'var(--st-accent)' }}
-                                            title="Has changes"
-                                          />
-                                        )}
-                                      </div>
+                                          </div>
+                                        );
+                                      })()}
                                     </div>
                                   </div>
 

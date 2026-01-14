@@ -706,3 +706,416 @@ describe('Git IPC Handlers - Branch Sync Status', () => {
     });
   });
 });
+
+describe('Git IPC Handlers - CI Status', () => {
+  let mockIpcMain: MockIpcMain;
+  let mockGitExecutor: { run: ReturnType<typeof vi.fn> };
+  let mockSessionManager: { getSession: ReturnType<typeof vi.fn> };
+  let mockServices: AppServices;
+
+  beforeEach(() => {
+    mockIpcMain = new MockIpcMain();
+
+    mockGitExecutor = {
+      run: vi.fn(),
+    };
+
+    mockSessionManager = {
+      getSession: vi.fn(),
+    };
+
+    mockServices = {
+      gitExecutor: mockGitExecutor,
+      sessionManager: mockSessionManager,
+      gitStagingManager: { stageHunk: vi.fn(), restoreHunk: vi.fn() },
+      gitStatusManager: { refreshSessionGitStatus: vi.fn() },
+      gitDiffManager: { getDiff: vi.fn() },
+      worktreeManager: {},
+      configManager: {},
+    } as unknown as AppServices;
+
+    registerGitHandlers(mockIpcMain as unknown as IpcMain, mockServices);
+  });
+
+  describe('sessions:get-ci-status', () => {
+    const sessionId = 'test-session-123';
+    const worktreePath = '/path/to/worktree';
+
+    beforeEach(() => {
+      mockSessionManager.getSession.mockReturnValue({ worktreePath });
+    });
+
+    it('should return error when session has no worktreePath', async () => {
+      mockSessionManager.getSession.mockReturnValue({ worktreePath: null });
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result).toEqual({ success: false, error: 'Session worktree not found' });
+    });
+
+    it('should return null when remote URL cannot be obtained', async () => {
+      mockGitExecutor.run.mockResolvedValueOnce({
+        exitCode: 1,
+        stdout: '',
+        stderr: 'fatal: No such remote',
+      } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result).toEqual({ success: true, data: null });
+    });
+
+    it('should return null for non-GitHub remotes', async () => {
+      mockGitExecutor.run.mockResolvedValueOnce({
+        exitCode: 0,
+        stdout: 'git@gitlab.com:owner/repo.git\n',
+        stderr: '',
+      } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result).toEqual({ success: true, data: null });
+    });
+
+    it('should return null when branch is empty', async () => {
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: '', // Empty branch (detached HEAD)
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result).toEqual({ success: true, data: null });
+    });
+
+    it('should return null when gh pr checks fails', async () => {
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature-branch\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 1, // gh pr checks fails (no PR)
+          stdout: '',
+          stderr: 'no pull requests found',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result).toEqual({ success: true, data: null });
+    });
+
+    it('should parse SUCCESS checks correctly', async () => {
+      const checksJson = JSON.stringify([
+        { name: 'build', state: 'SUCCESS', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:10:00Z', link: 'https://github.com/test/link1' },
+        { name: 'test', state: 'SUCCESS', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:12:00Z', link: 'https://github.com/test/link2' },
+      ]);
+
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: checksJson,
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({
+        rollupState: 'success',
+        checks: [
+          { id: 0, name: 'build', status: 'completed', conclusion: 'success', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:10:00Z', detailsUrl: 'https://github.com/test/link1' },
+          { id: 1, name: 'test', status: 'completed', conclusion: 'success', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:12:00Z', detailsUrl: 'https://github.com/test/link2' },
+        ],
+        totalCount: 2,
+        successCount: 2,
+        failureCount: 0,
+        pendingCount: 0,
+      });
+    });
+
+    it('should parse FAILURE checks correctly', async () => {
+      const checksJson = JSON.stringify([
+        { name: 'build', state: 'SUCCESS', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:10:00Z', link: 'https://github.com/test/link1' },
+        { name: 'test', state: 'FAILURE', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:08:00Z', link: 'https://github.com/test/link2' },
+      ]);
+
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: checksJson,
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result.success).toBe(true);
+      expect(result.data.rollupState).toBe('failure');
+      expect(result.data.successCount).toBe(1);
+      expect(result.data.failureCount).toBe(1);
+    });
+
+    it('should parse PENDING checks correctly', async () => {
+      const checksJson = JSON.stringify([
+        { name: 'build', state: 'PENDING', startedAt: null, completedAt: null, link: 'https://github.com/test/link1' },
+      ]);
+
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: checksJson,
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result.success).toBe(true);
+      expect(result.data.rollupState).toBe('pending');
+      expect(result.data.pendingCount).toBe(1);
+      expect(result.data.checks[0].status).toBe('queued');
+      expect(result.data.checks[0].conclusion).toBe(null);
+    });
+
+    it('should parse IN_PROGRESS checks correctly', async () => {
+      const checksJson = JSON.stringify([
+        { name: 'build', state: 'IN_PROGRESS', startedAt: '2026-01-14T05:00:00Z', completedAt: null, link: 'https://github.com/test/link1' },
+      ]);
+
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: checksJson,
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result.success).toBe(true);
+      expect(result.data.rollupState).toBe('in_progress');
+      expect(result.data.pendingCount).toBe(1);
+      expect(result.data.checks[0].status).toBe('in_progress');
+      expect(result.data.checks[0].conclusion).toBe(null);
+    });
+
+    it('should parse SKIPPED checks correctly', async () => {
+      const checksJson = JSON.stringify([
+        { name: 'optional-check', state: 'SKIPPED', startedAt: null, completedAt: null, link: null },
+      ]);
+
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: checksJson,
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result.success).toBe(true);
+      expect(result.data.checks[0].status).toBe('completed');
+      expect(result.data.checks[0].conclusion).toBe('skipped');
+      expect(result.data.successCount).toBe(1); // skipped counts as success
+    });
+
+    it('should parse CANCELLED checks correctly', async () => {
+      const checksJson = JSON.stringify([
+        { name: 'build', state: 'CANCELLED', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:01:00Z', link: null },
+      ]);
+
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: checksJson,
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result.success).toBe(true);
+      expect(result.data.checks[0].status).toBe('completed');
+      expect(result.data.checks[0].conclusion).toBe('cancelled');
+    });
+
+    it('should handle empty checks array', async () => {
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: '[]',
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result).toEqual({ success: true, data: null });
+    });
+
+    it('should handle malformed JSON gracefully', async () => {
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'not valid json',
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result).toEqual({ success: true, data: null });
+    });
+
+    it('should prioritize failure over in_progress in rollup state', async () => {
+      const checksJson = JSON.stringify([
+        { name: 'build', state: 'SUCCESS', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:10:00Z', link: null },
+        { name: 'test', state: 'FAILURE', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:08:00Z', link: null },
+        { name: 'lint', state: 'IN_PROGRESS', startedAt: '2026-01-14T05:00:00Z', completedAt: null, link: null },
+      ]);
+
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'git@github.com:owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'feature\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: checksJson,
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result.success).toBe(true);
+      expect(result.data.rollupState).toBe('failure'); // failure takes priority
+    });
+
+    it('should work with HTTPS remote URLs', async () => {
+      const checksJson = JSON.stringify([
+        { name: 'build', state: 'SUCCESS', startedAt: '2026-01-14T05:00:00Z', completedAt: '2026-01-14T05:10:00Z', link: null },
+      ]);
+
+      mockGitExecutor.run
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'https://github.com/owner/repo.git\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: 'main\n',
+          stderr: '',
+        } as MockRunResult)
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          stdout: checksJson,
+          stderr: '',
+        } as MockRunResult);
+
+      const result = await mockIpcMain.invoke('sessions:get-ci-status', sessionId);
+
+      expect(result.success).toBe(true);
+      expect(result.data.rollupState).toBe('success');
+
+      // Verify gh pr checks was called with correct --repo
+      const ghChecksCall = mockGitExecutor.run.mock.calls[2];
+      expect(ghChecksCall[0].argv).toContain('--repo');
+      expect(ghChecksCall[0].argv).toContain('owner/repo');
+    });
+  });
+});

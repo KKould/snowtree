@@ -88,6 +88,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.invoke('sessions:get-commits-behind-main', sessionId),
     getPrRemoteCommits: (sessionId: string): Promise<IPCResponse> =>
       ipcRenderer.invoke('sessions:get-pr-remote-commits', sessionId),
+    // CI status
+    getCIStatus: (sessionId: string): Promise<IPCResponse> =>
+      ipcRenderer.invoke('sessions:get-ci-status', sessionId),
   },
 
   panels: {

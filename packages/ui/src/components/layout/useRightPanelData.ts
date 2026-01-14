@@ -3,6 +3,7 @@ import { API } from '../../utils/api';
 import { withTimeout } from '../../utils/withTimeout';
 import type { FileChange } from './types';
 import { useSessionStore } from '../../stores/sessionStore';
+import { getCIStatus, type CIStatus } from '../../features/ci-status';
 
 export interface Commit {
   id: number;
@@ -56,6 +57,7 @@ export interface RightPanelData {
   remotePullRequest: RemotePullRequest | null;
   branchSyncStatus: BranchSyncStatus | null;
   prSyncStatus: PRSyncStatus | null;
+  ciStatus: CIStatus | null;
   commitFiles: FileChange[];
   selection: Selection;
   isLoading: boolean;
@@ -130,6 +132,7 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
   const [remotePullRequest, setRemotePullRequest] = useState<RemotePullRequest | null>(null);
   const [branchSyncStatus, setBranchSyncStatus] = useState<BranchSyncStatus | null>(null);
   const [prSyncStatus, setPrSyncStatus] = useState<PRSyncStatus | null>(null);
+  const [ciStatus, setCIStatus] = useState<CIStatus | null>(null);
   const [commitFiles, setCommitFiles] = useState<FileChange[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -298,6 +301,15 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
     }
   }, [sessionId]);
 
+  const fetchCIStatus = useCallback(async (): Promise<CIStatus | null> => {
+    if (!sessionId) return null;
+    try {
+      return await getCIStatus(sessionId);
+    } catch {
+      return null;
+    }
+  }, [sessionId]);
+
   const loadAll = useCallback(async (selectFirst: boolean, options?: { showLoading?: boolean }) => {
     if (!sessionId) return;
 
@@ -387,6 +399,7 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
       setRemotePullRequest(null);
       setBranchSyncStatus(null);
       setPrSyncStatus(null);
+      setCIStatus(null);
       setCommitFiles([]);
       setSelection(null);
       setError(null);
@@ -514,6 +527,16 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
           // No change
           return current;
         });
+
+        // Fetch CI status alongside PR status (only when PR exists)
+        if (newPR) {
+          const newCIStatus = await fetchCIStatus();
+          if (!controller.signal.aborted) {
+            setCIStatus(newCIStatus);
+          }
+        } else {
+          setCIStatus(null);
+        }
       } catch (error) {
         void error;
         // Ignore polling errors to avoid spamming
@@ -538,7 +561,7 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
       prPollingAbortRef.current?.abort();
       prPollingAbortRef.current = null;
     };
-  }, [sessionId, fetchRemotePullRequest]);
+  }, [sessionId, fetchRemotePullRequest, fetchCIStatus]);
 
   // Poll branch sync status periodically (requires fetch)
   useEffect(() => {
@@ -661,6 +684,7 @@ export function useRightPanelData(sessionId: string | undefined): RightPanelData
     remotePullRequest,
     branchSyncStatus,
     prSyncStatus,
+    ciStatus,
     commitFiles,
     selection,
     isLoading,

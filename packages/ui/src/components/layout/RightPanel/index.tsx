@@ -8,6 +8,7 @@ import { computeTrackedFiles, computeUntrackedFiles, countDiffHunksByPath, sumHu
 import { CommitList } from './CommitList';
 import { FileChangeList } from './FileChangeList';
 import type { WorkingTreeScope } from './types';
+import { CIStatusBadge, CIStatusDetails } from '../../../features/ci-status';
 
 export const RightPanel: React.FC<RightPanelProps> = React.memo(
   ({
@@ -30,6 +31,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
     const [isCommitsExpanded, setIsCommitsExpanded] = useState(true);
     const [isChangesExpanded, setIsChangesExpanded] = useState(true);
     const [isPRExpanded, setIsPRExpanded] = useState(true);
+    const [isCIExpanded, setIsCIExpanded] = useState(false);
 
     const {
       commits,
@@ -38,6 +40,7 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
       remotePullRequest,
       branchSyncStatus,
       prSyncStatus,
+      ciStatus,
       commitFiles,
       selection,
       isLoading,
@@ -59,6 +62,15 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
         // ignore
       }
     }, [remotePullRequest?.url]);
+
+    const handleCICheckClick = useCallback(async (check: { detailsUrl: string | null }) => {
+      if (!check.detailsUrl) return;
+      try {
+        await window.electronAPI?.invoke?.('shell:openExternal', check.detailsUrl);
+      } catch {
+        // ignore
+      }
+    }, []);
 
     const handleBaseCommitOpenGitHub = useCallback(async (commit: Commit) => {
       if (!commit.after_commit_hash || !session?.id) return;
@@ -254,38 +266,61 @@ export const RightPanel: React.FC<RightPanelProps> = React.memo(
             <div className="px-3 pb-3 space-y-2">
               {/* PR Info Card */}
               {remotePullRequest?.number && remotePullRequest.url ? (
-                <button
-                  type="button"
-                  onClick={handleOpenRemotePullRequest}
-                  className="w-full text-left p-2 rounded transition-all duration-75 st-hoverable st-focus-ring"
+                <div
+                  className="rounded"
                   style={{
                     backgroundColor: colors.bg.hover,
                     border: `1px solid ${colors.border}`,
                   }}
-                  data-testid="right-panel-open-remote-pr"
                 >
-                  <div className="flex items-center gap-2">
-                    <GitPullRequest className="w-4 h-4" style={{ color: colors.accent }} />
-                    <span className="text-xs font-medium" style={{ color: colors.text.primary }}>
-                      PR #{remotePullRequest.number}
-                    </span>
-                    {remotePullRequest.merged && (
-                      <span
-                        className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium"
-                        style={{
-                          backgroundColor: colors.text.added,
-                          color: '#fff',
-                        }}
-                      >
-                        <Check className="w-2.5 h-2.5" />
-                        merged
+                  <button
+                    type="button"
+                    onClick={handleOpenRemotePullRequest}
+                    className="w-full text-left p-2 transition-all duration-75 st-hoverable st-focus-ring rounded-t"
+                    data-testid="right-panel-open-remote-pr"
+                  >
+                    <div className="flex items-center gap-2">
+                      <GitPullRequest className="w-4 h-4" style={{ color: colors.accent }} />
+                      <span className="text-xs font-medium" style={{ color: colors.text.primary }}>
+                        PR #{remotePullRequest.number}
                       </span>
-                    )}
-                  </div>
-                  <div className="mt-1 text-[10px]" style={{ color: colors.text.muted }}>
-                    {prSyncStatus?.branch || 'branch'} → {session.baseBranch || 'main'}
-                  </div>
-                </button>
+                      {remotePullRequest.merged && (
+                        <span
+                          className="flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium"
+                          style={{
+                            backgroundColor: colors.text.added,
+                            color: '#fff',
+                          }}
+                        >
+                          <Check className="w-2.5 h-2.5" />
+                          merged
+                        </span>
+                      )}
+                      {ciStatus && (
+                        <CIStatusBadge
+                          status={ciStatus}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsCIExpanded(!isCIExpanded);
+                          }}
+                          expanded={isCIExpanded}
+                        />
+                      )}
+                    </div>
+                    <div className="mt-1 text-[10px]" style={{ color: colors.text.muted }}>
+                      {prSyncStatus?.branch || 'branch'} → {session.baseBranch || 'main'}
+                    </div>
+                  </button>
+                  {/* CI Status Details (expandable) */}
+                  {isCIExpanded && ciStatus && (
+                    <div className="px-2 pb-2">
+                      <CIStatusDetails
+                        checks={ciStatus.checks}
+                        onCheckClick={handleCICheckClick}
+                      />
+                    </div>
+                  )}
+                </div>
               ) : (
                 <div
                   className="p-2 rounded text-xs"

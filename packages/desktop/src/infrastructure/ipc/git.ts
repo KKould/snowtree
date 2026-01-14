@@ -852,4 +852,197 @@ export function registerGitHandlers(ipcMain: IpcMain, services: AppServices): vo
       return { success: false, error: error instanceof Error ? error.message : 'Failed to get PR remote commits' };
     }
   });
+
+  // ============================================
+  // CI Status: Get PR check runs status
+  // ============================================
+
+  ipcMain.handle('sessions:get-ci-status', async (_event, sessionId: string) => {
+    try {
+      const session = sessionManager.getSession(sessionId);
+      if (!session?.worktreePath) {
+        return { success: false, error: 'Session worktree not found' };
+      }
+
+      const cwd = session.worktreePath;
+
+      // Get remote URL to extract owner/repo
+      const remoteRes = await gitExecutor.run({
+        sessionId,
+        cwd,
+        argv: ['git', 'remote', 'get-url', 'origin'],
+        op: 'read',
+        recordTimeline: false,
+        throwOnError: false,
+        timeoutMs: 3_000,
+        meta: { source: 'ipc.git', operation: 'ci-status-remote' },
+      });
+
+      if (remoteRes.exitCode !== 0 || !remoteRes.stdout?.trim()) {
+        return { success: true, data: null };
+      }
+
+      const url = remoteRes.stdout.trim();
+      const match = url.match(/github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
+      if (!match) {
+        return { success: true, data: null };
+      }
+
+      const ownerRepo = match[1];
+
+      // Get current branch
+      const branchRes = await gitExecutor.run({
+        sessionId,
+        cwd,
+        argv: ['git', 'branch', '--show-current'],
+        op: 'read',
+        recordTimeline: false,
+        throwOnError: false,
+        timeoutMs: 3_000,
+        meta: { source: 'ipc.git', operation: 'ci-status-branch' },
+      });
+
+      const branch = branchRes.stdout?.trim();
+      if (!branch) {
+        return { success: true, data: null };
+      }
+
+      // Use gh pr checks to get CI status
+      // gh pr checks --json returns: name, state (SUCCESS/FAILURE/PENDING/etc), startedAt, completedAt, link
+      const checksRes = await gitExecutor.run({
+        sessionId,
+        cwd,
+        argv: [
+          'gh', 'pr', 'checks',
+          '--repo', ownerRepo,
+          branch,
+          '--json', 'name,state,startedAt,completedAt,link',
+        ],
+        op: 'read',
+        recordTimeline: false,
+        throwOnError: false,
+        timeoutMs: 8_000,
+        meta: { source: 'ipc.git', operation: 'ci-status-checks' },
+      });
+
+      if (checksRes.exitCode !== 0) {
+        // No PR or no checks
+        return { success: true, data: null };
+      }
+
+      const raw = checksRes.stdout?.trim();
+      if (!raw) {
+        return { success: true, data: null };
+      }
+
+      try {
+        const checksData = JSON.parse(raw) as Array<{
+          name?: string;
+          state?: string;  // SUCCESS, FAILURE, PENDING, IN_PROGRESS, SKIPPED, etc
+          startedAt?: string;
+          completedAt?: string;
+          link?: string;
+        }>;
+
+        if (!Array.isArray(checksData) || checksData.length === 0) {
+          return { success: true, data: null };
+        }
+
+        // Map to our CICheck type
+        // gh pr checks uses 'state' for the combined status/conclusion
+        const checks = checksData.map((c, idx) => {
+          const { status, conclusion } = parseGhCheckState(c.state);
+          return {
+            id: idx,
+            name: c.name || 'Unknown',
+            status,
+            conclusion,
+            startedAt: c.startedAt || null,
+            completedAt: c.completedAt || null,
+            detailsUrl: c.link || null,
+          };
+        });
+
+        // Calculate counts
+        let successCount = 0;
+        let failureCount = 0;
+        let pendingCount = 0;
+
+        for (const check of checks) {
+          if (check.status !== 'completed') {
+            pendingCount++;
+          } else if (check.conclusion === 'success' || check.conclusion === 'neutral' || check.conclusion === 'skipped') {
+            successCount++;
+          } else if (check.conclusion === 'failure') {
+            failureCount++;
+          }
+        }
+
+        // Determine rollup state
+        let rollupState: 'pending' | 'in_progress' | 'success' | 'failure' | 'neutral';
+        if (failureCount > 0) {
+          rollupState = 'failure';
+        } else if (checks.some(c => c.status === 'in_progress')) {
+          rollupState = 'in_progress';
+        } else if (checks.some(c => c.status === 'queued')) {
+          rollupState = 'pending';
+        } else if (successCount === checks.length) {
+          rollupState = 'success';
+        } else {
+          rollupState = 'neutral';
+        }
+
+        return {
+          success: true,
+          data: {
+            rollupState,
+            checks,
+            totalCount: checks.length,
+            successCount,
+            failureCount,
+            pendingCount,
+          },
+        };
+      } catch {
+        return { success: true, data: null };
+      }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to get CI status' };
+    }
+  });
+}
+
+// Helper: parse gh pr checks 'state' field to status and conclusion
+// gh pr checks state values: SUCCESS, FAILURE, PENDING, IN_PROGRESS, SKIPPED, CANCELLED, etc
+function parseGhCheckState(state?: string): {
+  status: 'queued' | 'in_progress' | 'completed';
+  conclusion: 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out' | 'action_required' | null;
+} {
+  const s = state?.toUpperCase();
+  switch (s) {
+    case 'PENDING':
+    case 'QUEUED':
+    case 'WAITING':
+      return { status: 'queued', conclusion: null };
+    case 'IN_PROGRESS':
+      return { status: 'in_progress', conclusion: null };
+    case 'SUCCESS':
+      return { status: 'completed', conclusion: 'success' };
+    case 'FAILURE':
+    case 'ERROR':
+      return { status: 'completed', conclusion: 'failure' };
+    case 'CANCELLED':
+      return { status: 'completed', conclusion: 'cancelled' };
+    case 'SKIPPED':
+      return { status: 'completed', conclusion: 'skipped' };
+    case 'NEUTRAL':
+      return { status: 'completed', conclusion: 'neutral' };
+    case 'TIMED_OUT':
+      return { status: 'completed', conclusion: 'timed_out' };
+    case 'ACTION_REQUIRED':
+      return { status: 'completed', conclusion: 'action_required' };
+    default:
+      // Unknown state, treat as completed with null conclusion
+      return { status: 'completed', conclusion: null };
+  }
 }

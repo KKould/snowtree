@@ -131,6 +131,23 @@ export interface ElectronAPI {
     // Branch sync status helpers
     getCommitsBehindMain: (sessionId: string) => Promise<IPCResponse<{ behind: number; baseBranch: string }>>;
     getPrRemoteCommits: (sessionId: string) => Promise<IPCResponse<{ ahead: number; behind: number; branch: string | null }>>;
+    // CI status
+    getCIStatus: (sessionId: string) => Promise<IPCResponse<{
+      rollupState: 'pending' | 'in_progress' | 'success' | 'failure' | 'neutral';
+      checks: Array<{
+        id: number;
+        name: string;
+        status: 'queued' | 'in_progress' | 'completed';
+        conclusion: 'success' | 'failure' | 'neutral' | 'cancelled' | 'skipped' | 'timed_out' | 'action_required' | null;
+        startedAt: string | null;
+        completedAt: string | null;
+        detailsUrl: string | null;
+      }>;
+      totalCount: number;
+      successCount: number;
+      failureCount: number;
+      pendingCount: number;
+    } | null>>;
   };
 
   panels: {

@@ -82,7 +82,7 @@ export function useIPCEvents() {
 
     const maybeOnSessionTodosUpdate = window.electronAPI.events.onSessionTodosUpdate;
     if (maybeOnSessionTodosUpdate) {
-      unsubscribes.push(maybeOnSessionTodosUpdate((data: { sessionId: string; todos: Array<{ status: string; content: string; activeForm?: string }> }) => {
+      unsubscribes.push(maybeOnSessionTodosUpdate((data) => {
         console.log('[useIPCEvents] Session todos update received for session:', data.sessionId, 'todos:', data.todos);
         updateSessionTodos(data.sessionId, data.todos);
       }));

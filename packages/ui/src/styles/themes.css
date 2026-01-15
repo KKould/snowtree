@@ -43,7 +43,7 @@
 
   /* Typography */
   --st-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --st-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --st-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   --st-font-xs: 11px;
   --st-font-sm: 12px;
   --st-font-base: 13px;

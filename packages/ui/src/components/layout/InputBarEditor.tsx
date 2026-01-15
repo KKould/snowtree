@@ -96,7 +96,7 @@ export const InputBarEditor = forwardRef<InputBarEditorHandle, InputBarEditorPro
             line-height: 1.5;
             white-space: pre-wrap;
             word-break: break-word;
-            font-family: Monaco, monospace;
+            font-family: var(--st-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, monospace);
             font-size: 14px;
             font-weight: 400;
           `,

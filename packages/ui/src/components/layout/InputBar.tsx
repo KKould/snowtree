@@ -706,7 +706,7 @@ export const InputBar: React.FC<InputBarProps> = React.memo(({
                 />
               </div>
 
-              <div className="flex items-center gap-2 mt-2 text-[12px]">
+              <div className="flex items-center gap-2 mt-2 text-[12px] st-font-mono">
                 <span data-testid="input-agent" style={{ color: 'var(--st-accent)' }}>{agentName}</span>
                 <span
                   data-testid="input-mode"
@@ -736,7 +736,8 @@ export const InputBar: React.FC<InputBarProps> = React.memo(({
           </div>
 
           <div
-            className="flex items-center justify-between ml-2 mt-1 text-[11px]"
+            className="flex items-center justify-between ml-2 mt-1 text-[11px] st-font-mono"
+            data-testid="input-hints"
             onClick={handleFocusHintClick}
           >
             <div className="flex items-center gap-2">

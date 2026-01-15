@@ -36,6 +36,10 @@
     color: var(--st-text-faint);
   }
 
+  .st-font-mono {
+    font-family: var(--st-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, monospace);
+  }
+
   .st-accent {
     color: var(--st-accent);
   }
@@ -502,14 +506,14 @@ body {
 
 /* Terminal command bar styles */
 .command-bar-focus {
-  box-shadow: 
+  box-shadow:
     0 0 0 2px rgba(59, 130, 246, 0.5),
     0 0 20px rgba(59, 130, 246, 0.3),
     inset 0 0 20px rgba(59, 130, 246, 0.1);
 }
 
 .command-bar-focus-green {
-  box-shadow: 
+  box-shadow:
     0 0 0 2px rgba(34, 197, 94, 0.5),
     0 0 20px rgba(34, 197, 94, 0.3),
     inset 0 0 20px rgba(34, 197, 94, 0.1);
@@ -761,7 +765,7 @@ body {
   color: var(--st-text-faint);
   pointer-events: none;
   height: 0;
-  font-family: Monaco, monospace;
+  font-family: var(--st-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, monospace);
   font-size: 14px;
   font-weight: 400;
 }

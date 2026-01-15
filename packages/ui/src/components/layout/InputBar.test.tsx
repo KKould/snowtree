@@ -567,4 +567,28 @@ describe('InputBar - Cursor Position Tests', () => {
     fireEvent.keyDown(editor, { key: 'ArrowUp' });
     expect(editor.textContent).toBe('second msg');
   });
+
+  it('uses the shared input monospace font for editor and hints', async () => {
+    render(
+      <InputBar
+        session={mockSession}
+        panelId="test-panel"
+        selectedTool="claude"
+        onSend={mockOnSend}
+        onCancel={mockOnCancel}
+        isProcessing={false}
+      />
+    );
+
+    const editor = await getEditor();
+    const editorStyle = editor.getAttribute('style') || '';
+    expect(editorStyle).toContain('font-family: var(--st-font-mono');
+
+    const agentLine = screen.getByTestId('input-agent').closest('div');
+    expect(agentLine).not.toBeNull();
+    expect(agentLine).toHaveClass('st-font-mono');
+
+    const hintsLine = screen.getByTestId('input-hints');
+    expect(hintsLine).toHaveClass('st-font-mono');
+  });
 });

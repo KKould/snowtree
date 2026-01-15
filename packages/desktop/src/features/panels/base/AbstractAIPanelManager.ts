@@ -315,6 +315,17 @@ export abstract class AbstractAIPanelManager {
         throw new Error(`Session ${mapping.sessionId} has no worktree path`);
       }
 
+      // Check if we have an agent session ID for resume
+      const hasValidAgentSessionId = typeof mapping.agentSessionId === 'string' && mapping.agentSessionId.length > 0;
+
+      if (!hasValidAgentSessionId) {
+        this.logger?.warn(
+          `[${this.getAgentName()}PanelManager] No agent session ID available for panel ${panelId}. ` +
+          `This can happen if the process exited before the init message was received. ` +
+          `Starting a new conversation with the answer.`
+        );
+      }
+
       // Format answers as a readable response for Claude
       const answerText = this.formatAnswersForPrompt(answers);
 
@@ -325,14 +336,14 @@ export abstract class AbstractAIPanelManager {
         worktreePath: session.worktreePath,
       };
 
-      // Resume the session with the answer
+      // Resume the session with the answer (only if we have a valid agent session ID)
       const spawnOptions: ExecutorSpawnOptions = {
         panelId,
         sessionId: mapping.sessionId,
         worktreePath: session.worktreePath,
         prompt: answerText,
-        isResume: true,
-        agentSessionId: mapping.agentSessionId,
+        isResume: hasValidAgentSessionId,
+        agentSessionId: hasValidAgentSessionId ? mapping.agentSessionId : undefined,
         ...this.extractSpawnOptions(config, mapping)
       };
 

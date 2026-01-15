@@ -189,6 +189,29 @@ describe('SessionManager', () => {
       await sessionManager.updateSession(session.id, { status: 'completed' });
       expect(sessionManager.getSession(session.id).isRunning).toBe(false);
     });
+
+    it('should persist toolType and executionMode changes', async () => {
+      const session = await sessionManager.createSession({
+        name: 'Test',
+        worktreePath: '/tmp/test',
+        prompt: 'Test',
+        toolType: 'claude',
+      });
+
+      await sessionManager.updateSession(session.id, { toolType: 'codex', executionMode: 'plan' });
+
+      const reloadedManager = new SessionManager(mockDb);
+      const updated = reloadedManager.getSession(session.id);
+
+      expect(updated.toolType).toBe('codex');
+      expect(updated.executionMode).toBe('plan');
+
+      await reloadedManager.updateSession(session.id, { status: 'running' });
+      const afterStatusUpdate = reloadedManager.getSession(session.id);
+
+      expect(afterStatusUpdate.toolType).toBe('codex');
+      expect(afterStatusUpdate.executionMode).toBe('plan');
+    });
   });
 
   describe('getAllSessions', () => {

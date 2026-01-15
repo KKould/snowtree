@@ -117,6 +117,7 @@ export interface UpdateSessionData {
   run_started_at?: string;
   is_favorite?: boolean;
   auto_commit?: boolean;
+  tool_type?: 'claude' | 'codex' | 'none';
   commit_mode?: 'structured' | 'checkpoint' | 'disabled';
   commit_mode_settings?: string; // JSON string of CommitModeSettings
   skip_continue_next?: boolean;
@@ -125,6 +126,7 @@ export interface UpdateSessionData {
   base_commit?: string | null;
   base_branch?: string | null;
   archived?: boolean;
+  execution_mode?: 'plan' | 'execute';
 }
 
 export interface PromptMarker {

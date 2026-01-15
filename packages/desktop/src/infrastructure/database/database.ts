@@ -842,6 +842,10 @@ export class DatabaseService {
       updates.push('auto_commit = ?');
       values.push(data.auto_commit ? 1 : 0);
     }
+    if (data.tool_type !== undefined) {
+      updates.push('tool_type = ?');
+      values.push(data.tool_type);
+    }
     if (data.skip_continue_next !== undefined) {
       updates.push('skip_continue_next = ?');
       values.push(data.skip_continue_next ? 1 : 0);
@@ -857,6 +861,10 @@ export class DatabaseService {
     if (data.archived !== undefined) {
       updates.push('archived = ?');
       values.push(data.archived ? 1 : 0);
+    }
+    if (data.execution_mode !== undefined) {
+      updates.push('execution_mode = ?');
+      values.push(data.execution_mode);
     }
 
     if (updates.length === 0) {

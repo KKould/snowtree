@@ -349,6 +349,8 @@ export class SessionManager extends EventEmitter {
       : toolTypeFromDb === 'none'
         ? 'none'
         : 'claude';
+    const executionModeFromDb = (dbSession as DbSession & { execution_mode?: 'plan' | 'execute' | null }).execution_mode;
+    const normalizedExecutionMode: 'plan' | 'execute' = executionModeFromDb === 'plan' ? 'plan' : 'execute';
 
     const mappedStatus = this.mapDbStatusToSessionStatus(dbSession.status, dbSession.last_viewed_at || undefined, dbSession.updated_at);
 
@@ -386,6 +388,7 @@ export class SessionManager extends EventEmitter {
       commitModeSettings: dbSession.commit_mode_settings || undefined,
       skipContinueNext: dbSession.skip_continue_next || undefined,
       claudeSessionId: dbSession.claude_session_id || undefined,
+      executionMode: normalizedExecutionMode,
     };
   }
 
@@ -826,7 +829,13 @@ export class SessionManager extends EventEmitter {
       dbUpdate.base_branch = update.baseBranch;
     }
 
-    // Model is now managed at panel level, not session level
+    if (update.toolType !== undefined) {
+      dbUpdate.tool_type = update.toolType;
+    }
+
+    if (update.executionMode !== undefined) {
+      dbUpdate.execution_mode = update.executionMode;
+    }
 
     if (update.skipContinueNext !== undefined) {
       dbUpdate.skip_continue_next = update.skipContinueNext;

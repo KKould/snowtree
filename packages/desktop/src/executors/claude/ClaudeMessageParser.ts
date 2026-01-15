@@ -327,9 +327,28 @@ export class ClaudeMessageParser {
       return `Searching: ${input.query}`;
     }
 
+    if (name === 'todowrite') {
+      const todos = input.todos as Array<{ status: string; content: string }> | undefined;
+      if (todos && Array.isArray(todos)) {
+        const count = todos.length;
+        const completed = todos.filter(t => t.status === 'completed').length;
+        const inProgress = todos.filter(t => t.status === 'in_progress').length;
+        return `TodoWrite: ${count} tasks (${completed} completed, ${inProgress} in progress)`;
+      }
+      return `${toolName}: updating tasks`;
+    }
+
     // Default: show tool name and key input fields
     const keys = Object.keys(input).slice(0, 3);
-    const summary = keys.map((k) => `${k}=${String(input[k]).substring(0, 50)}`).join(', ');
+    const summary = keys.map((k) => {
+      const value = input[k];
+      // Handle objects and arrays properly
+      if (typeof value === 'object' && value !== null) {
+        const jsonStr = JSON.stringify(value);
+        return `${k}=${jsonStr.substring(0, 50)}${jsonStr.length > 50 ? '...' : ''}`;
+      }
+      return `${k}=${String(value).substring(0, 50)}`;
+    }).join(', ');
     return `${toolName}: ${summary}`;
   }
 

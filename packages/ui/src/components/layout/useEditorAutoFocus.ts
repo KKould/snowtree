@@ -136,6 +136,9 @@ export function useEditorAutoFocus(
       ];
       if (skipKeys.includes(e.key)) return;
 
+      // Only insert printable single characters
+      if (e.key.length !== 1) return;
+
       e.preventDefault();
       if (!focusEditor()) return;
       setTimeout(() => {

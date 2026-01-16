@@ -9,7 +9,7 @@ import type { TimelineEvent, UserQuestionEvent } from '../../../types/timeline';
 import type { Session } from '../../../types/session';
 import { formatDistanceToNow, parseTimestamp } from '../../../utils/timestampUtils';
 import { ThinkingMessage } from './ThinkingMessage';
-import { ToolCallMessage } from './ToolCallMessage';
+import { ToolCallMessage, getToolIcon } from './ToolCallMessage';
 import { UserQuestionDialog, type Question } from './UserQuestionDialog';
 import { InlineDiffViewer } from './InlineDiffViewer';
 import './MessageStyles.css';
@@ -130,7 +130,13 @@ const formatSeconds = (durationMs: number): string => {
   return `${seconds.toFixed(1)}s`;
 };
 
-const getCommandIcon = (kind: 'cli' | 'git' | 'worktree', command: string, meta?: Record<string, unknown>) => {
+const getCommandIcon = (_kind: 'cli' | 'git' | 'worktree', command: string, meta?: Record<string, unknown>) => {
+  // Check for tool calls recorded as cli.command (meta.toolName exists)
+  const toolName = typeof meta?.toolName === 'string' ? meta.toolName : null;
+  if (toolName) {
+    return getToolIcon(toolName);
+  }
+
   // Check for Edit tool (has oldString/newString in meta)
   if (meta?.oldString !== undefined || meta?.newString !== undefined) {
     return Edit3;

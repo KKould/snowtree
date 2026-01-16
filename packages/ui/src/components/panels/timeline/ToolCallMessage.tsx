@@ -12,7 +12,7 @@ export interface ToolCallMessageProps {
   exitCode?: number;
 }
 
-const getToolIcon = (toolName: string) => {
+export const getToolIcon = (toolName: string) => {
   switch (toolName) {
     case 'Read': return FileText;
     case 'Bash': return Terminal;
@@ -223,7 +223,7 @@ export function ToolCallMessage({
       >
         <ToolIcon className="tool-icon" size={14} style={{ flexShrink: 0, marginRight: 8 }} />
         <span className="tool-name">{toolName}</span>
-        <StatusIcon className={`tool-status ${getStatusClass()}`} size={12} style={{ flexShrink: 0, marginLeft: 8 }} title={getStatusClass()} />
+        <StatusIcon className={`tool-status ${getStatusClass()}`} size={12} style={{ flexShrink: 0, marginLeft: 8 }} />
         <span className="tool-timestamp">{formatTime(timestamp)}</span>
         <span className="expand-icon">{expanded ? '▼' : '▶'}</span>
       </div>

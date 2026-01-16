@@ -45,12 +45,12 @@ const findNextTextNode = (node: Node, root: Node): Text | null => {
   let current: Node | null = node;
 
   while (current && current !== root) {
-    const parent = current.parentNode;
+    const parent: Node | null = current.parentNode;
     if (!parent) {
       return null;
     }
 
-    const siblings = Array.from(parent.childNodes);
+    const siblings = Array.from(parent.childNodes) as Node[];
     const startIndex = siblings.indexOf(current);
     for (let i = startIndex + 1; i < siblings.length; i += 1) {
       const found = findTextNode(siblings[i], 'forward');

@@ -6,6 +6,7 @@ import { ImagePill } from './extensions/ImagePill';
 import { TerminalShortcuts } from './extensions/TerminalShortcuts';
 import { InputHistory } from './extensions/InputHistory';
 import { PasteImage } from './extensions/PasteImage';
+import { BlockCaret } from './extensions/BlockCaret';
 import type { ImageAttachment } from './types';
 
 export interface InputBarEditorProps {
@@ -75,6 +76,7 @@ export const InputBarEditor = forwardRef<InputBarEditorHandle, InputBarEditorPro
           placeholder,
         }),
         ImagePill,
+        BlockCaret,
         TerminalShortcuts,
         InputHistory.configure({
           getHistory: () => inputHistory.current,
@@ -97,7 +99,7 @@ export const InputBarEditor = forwardRef<InputBarEditorHandle, InputBarEditorPro
             white-space: pre-wrap;
             word-break: break-word;
             font-family: var(--st-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, monospace);
-            font-size: 14px;
+            font-size: var(--st-font-base, 13px);
             font-weight: 400;
           `,
         },

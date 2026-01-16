@@ -28,14 +28,36 @@ const getEditorTextNodes = (editor: HTMLElement): Text[] => {
   return Array.from(paragraph.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE) as Text[];
 };
 
-const setSelectionRange = (node: Text, start: number, end = start) => {
+type NodeOffset = { node: Text; offset: number };
+
+const getNodeOffsetAt = (editor: HTMLElement, offset: number): NodeOffset => {
+  const textNodes = getEditorTextNodes(editor);
+  if (textNodes.length === 0) {
+    throw new Error('Expected editor to contain text nodes');
+  }
+
+  let remaining = offset;
+  for (const node of textNodes) {
+    const length = node.textContent?.length ?? 0;
+    if (remaining <= length) {
+      return { node, offset: remaining };
+    }
+    remaining -= length;
+  }
+
+  const lastNode = textNodes[textNodes.length - 1];
+  return { node: lastNode, offset: lastNode.textContent?.length ?? 0 };
+};
+
+const setSelectionRange = (start: NodeOffset, end?: NodeOffset) => {
   const selection = window.getSelection();
   if (!selection) {
     throw new Error('Expected selection to be available');
   }
   const range = document.createRange();
-  range.setStart(node, start);
-  range.setEnd(node, end);
+  range.setStart(start.node, start.offset);
+  const rangeEnd = end ?? start;
+  range.setEnd(rangeEnd.node, rangeEnd.offset);
   selection.removeAllRanges();
   selection.addRange(range);
   document.dispatchEvent(new Event('selectionchange'));
@@ -46,19 +68,11 @@ const getEditor = async (): Promise<HTMLDivElement> => {
 };
 
 const setCaretInEditor = (editor: HTMLElement, offset: number) => {
-  const textNodes = getEditorTextNodes(editor);
-  if (textNodes.length === 0) {
-    throw new Error('Expected editor to contain text nodes');
-  }
-  setSelectionRange(textNodes[0], offset);
+  setSelectionRange(getNodeOffsetAt(editor, offset));
 };
 
 const selectRangeInEditor = (editor: HTMLElement, start: number, end: number) => {
-  const textNodes = getEditorTextNodes(editor);
-  if (textNodes.length === 0) {
-    throw new Error('Expected editor to contain text nodes');
-  }
-  setSelectionRange(textNodes[0], start, end);
+  setSelectionRange(getNodeOffsetAt(editor, start), getNodeOffsetAt(editor, end));
 };
 
 // Mock API
@@ -568,7 +582,9 @@ describe('InputBar - Cursor Position Tests', () => {
     expect(editor.textContent).toBe('second msg');
   });
 
-  it('uses the shared input monospace font for editor and hints', async () => {
+  it('renders a block caret when focused', async () => {
+    const user = userEvent.setup();
+
     render(
       <InputBar
         session={mockSession}
@@ -581,14 +597,100 @@ describe('InputBar - Cursor Position Tests', () => {
     );
 
     const editor = await getEditor();
-    const editorStyle = editor.getAttribute('style') || '';
-    expect(editorStyle).toContain('font-family: var(--st-font-mono');
+    await user.click(editor);
 
-    const agentLine = screen.getByTestId('input-agent').closest('div');
-    expect(agentLine).not.toBeNull();
-    expect(agentLine).toHaveClass('st-font-mono');
-
-    const hintsLine = screen.getByTestId('input-hints');
-    expect(hintsLine).toHaveClass('st-font-mono');
+    await waitFor(() => {
+      const caret = editor.querySelector('.st-block-caret');
+      expect(caret).toBeInTheDocument();
+    });
   });
+
+  it('sets block caret width from measured character width', async () => {
+    const user = userEvent.setup();
+    const originalGetBoundingClientRect = Range.prototype.getBoundingClientRect;
+
+    Range.prototype.getBoundingClientRect = () =>
+      ({
+        top: 0,
+        left: 0,
+        width: 20,
+        height: 0,
+        right: 20,
+        bottom: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    render(
+      <InputBar
+        session={mockSession}
+        panelId="test-panel"
+        selectedTool="claude"
+        onSend={mockOnSend}
+        onCancel={mockOnCancel}
+        isProcessing={false}
+      />
+    );
+
+    try {
+      const editor = await getEditor();
+      await user.click(editor);
+      await user.type(editor, 'WW');
+      setCaretInEditor(editor, 1);
+
+      await waitFor(() => {
+        const caret = editor.querySelector('.st-block-caret') as HTMLElement | null;
+        expect(caret).toBeInTheDocument();
+        expect(caret?.style.getPropertyValue('--st-block-caret-width')).toBe('20px');
+      });
+    } finally {
+      Range.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
+  it('keeps default caret width when at end of text', async () => {
+    const user = userEvent.setup();
+    const originalGetBoundingClientRect = Range.prototype.getBoundingClientRect;
+
+    Range.prototype.getBoundingClientRect = () =>
+      ({
+        top: 0,
+        left: 0,
+        width: 20,
+        height: 0,
+        right: 20,
+        bottom: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    render(
+      <InputBar
+        session={mockSession}
+        panelId="test-panel"
+        selectedTool="claude"
+        onSend={mockOnSend}
+        onCancel={mockOnCancel}
+        isProcessing={false}
+      />
+    );
+
+    try {
+      const editor = await getEditor();
+      await user.click(editor);
+      await user.type(editor, 'W');
+      setCaretInEditor(editor, 1);
+
+      await waitFor(() => {
+        const caret = editor.querySelector('.st-block-caret') as HTMLElement | null;
+        expect(caret).toBeInTheDocument();
+        expect(caret?.style.getPropertyValue('--st-block-caret-width')).toBe('');
+      });
+    } finally {
+      Range.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+    }
+  });
+
 });

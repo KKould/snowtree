@@ -36,10 +36,6 @@
     color: var(--st-text-faint);
   }
 
-  .st-font-mono {
-    font-family: var(--st-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, monospace);
-  }
-
   .st-accent {
     color: var(--st-accent);
   }
@@ -768,4 +764,44 @@ body {
   font-family: var(--st-font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, monospace);
   font-size: 14px;
   font-weight: 400;
+}
+
+.tiptap-editor {
+  caret-color: transparent;
+}
+
+.tiptap-editor .st-block-caret {
+  display: inline-block;
+  width: 0;
+  height: 1em;
+  position: relative;
+  vertical-align: -0.15em;
+  pointer-events: none;
+}
+
+.tiptap-editor .st-block-caret::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--st-block-caret-width, 1ch);
+  height: 1em;
+  border-radius: 1px;
+  background: currentColor;
+  animation: st-block-caret-blink var(--st-caret-blink, 1s) step-start infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tiptap-editor .st-block-caret::after {
+    animation: none;
+  }
+}
+
+@keyframes st-block-caret-blink {
+  0%, 50% {
+    opacity: 0.8;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
 }

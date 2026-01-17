@@ -343,12 +343,14 @@ export class SessionManager extends EventEmitter {
   }
 
   private convertDbSessionToSession(dbSession: DbSession): Session {
-    const toolTypeFromDb = (dbSession as DbSession & { tool_type?: string }).tool_type as 'claude' | 'codex' | 'none' | null | undefined;
-    const normalizedToolType: 'claude' | 'codex' | 'none' = toolTypeFromDb === 'codex'
+    const toolTypeFromDb = (dbSession as DbSession & { tool_type?: string }).tool_type as 'claude' | 'codex' | 'gemini' | 'none' | null | undefined;
+    const normalizedToolType: 'claude' | 'codex' | 'gemini' | 'none' = toolTypeFromDb === 'codex'
       ? 'codex'
-      : toolTypeFromDb === 'none'
-        ? 'none'
-        : 'claude';
+      : toolTypeFromDb === 'gemini'
+        ? 'gemini'
+        : toolTypeFromDb === 'none'
+          ? 'none'
+          : 'claude';
     const executionModeFromDb = (dbSession as DbSession & { execution_mode?: 'plan' | 'execute' | null }).execution_mode;
     const normalizedExecutionMode: 'plan' | 'execute' = executionModeFromDb === 'plan' ? 'plan' : 'execute';
 
@@ -472,7 +474,7 @@ export class SessionManager extends EventEmitter {
       isMainRepo?: boolean;
       autoCommit?: boolean;
       folderId?: string;
-      toolType?: 'claude' | 'codex' | 'none';
+      toolType?: 'claude' | 'codex' | 'gemini' | 'none';
       baseCommit?: string;
       baseBranch?: string;
       commitMode?: 'structured' | 'checkpoint' | 'disabled';
@@ -486,7 +488,7 @@ export class SessionManager extends EventEmitter {
     isMainRepo?: boolean,
     autoCommit?: boolean,
     folderId?: string,
-    toolType?: 'claude' | 'codex' | 'none',
+    toolType?: 'claude' | 'codex' | 'gemini' | 'none',
     baseCommit?: string,
     baseBranch?: string,
     commitMode?: 'structured' | 'checkpoint' | 'disabled',
@@ -502,7 +504,7 @@ export class SessionManager extends EventEmitter {
     let resolvedIsMainRepo: boolean | undefined;
     let resolvedAutoCommit: boolean | undefined;
     let resolvedFolderId: string | undefined;
-    let resolvedToolType: 'claude' | 'codex' | 'none' | undefined;
+    let resolvedToolType: 'claude' | 'codex' | 'gemini' | 'none' | undefined;
     let resolvedBaseCommit: string | undefined;
     let resolvedBaseBranch: string | undefined;
     let resolvedCommitMode: 'structured' | 'checkpoint' | 'disabled' | undefined;
@@ -575,7 +577,7 @@ export class SessionManager extends EventEmitter {
       isMainRepo?: boolean;
       autoCommit?: boolean;
       folderId?: string;
-      toolType?: 'claude' | 'codex' | 'none';
+      toolType?: 'claude' | 'codex' | 'gemini' | 'none';
       baseCommit?: string;
       baseBranch?: string;
       commitMode?: 'structured' | 'checkpoint' | 'disabled';
@@ -589,7 +591,7 @@ export class SessionManager extends EventEmitter {
     isMainRepo?: boolean,
     autoCommit?: boolean,
     folderId?: string,
-    toolType?: 'claude' | 'codex' | 'none',
+    toolType?: 'claude' | 'codex' | 'gemini' | 'none',
     baseCommit?: string,
     baseBranch?: string,
     commitMode?: 'structured' | 'checkpoint' | 'disabled',
@@ -605,7 +607,7 @@ export class SessionManager extends EventEmitter {
     let resolvedIsMainRepo: boolean | undefined;
     let resolvedAutoCommit: boolean | undefined;
     let resolvedFolderId: string | undefined;
-    let resolvedToolType: 'claude' | 'codex' | 'none' | undefined;
+    let resolvedToolType: 'claude' | 'codex' | 'gemini' | 'none' | undefined;
     let resolvedBaseCommit: string | undefined;
     let resolvedBaseBranch: string | undefined;
     let resolvedCommitMode: 'structured' | 'checkpoint' | 'disabled' | undefined;
@@ -677,7 +679,7 @@ export class SessionManager extends EventEmitter {
     isMainRepo?: boolean,
     autoCommit?: boolean,
     folderId?: string,
-    toolType?: 'claude' | 'codex' | 'none',
+    toolType?: 'claude' | 'codex' | 'gemini' | 'none',
     baseCommit?: string,
     baseBranch?: string,
     commitMode?: 'structured' | 'checkpoint' | 'disabled',
@@ -1098,6 +1100,19 @@ export class SessionManager extends EventEmitter {
           }
         } catch (error) {
           console.error(`[SessionManager] Failed to stop Codex panels for session ${id}:`, error);
+        }
+      }
+
+      // Stop Gemini panels
+      const geminiPanels = panels.filter(p => p.type === 'gemini');
+      if (geminiPanels.length > 0) {
+        try {
+          const { geminiPanelManager } = require('../ipc/geminiPanel');
+          for (const panel of geminiPanels) {
+            await geminiPanelManager.unregisterPanel(panel.id);
+          }
+        } catch (error) {
+          console.error(`[SessionManager] Failed to stop Gemini panels for session ${id}:`, error);
         }
       }
     } catch (error) {

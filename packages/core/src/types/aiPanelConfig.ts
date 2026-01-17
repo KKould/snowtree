@@ -20,6 +20,9 @@ export interface AIPanelConfig {
   sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
   webSearch?: boolean;
   thinkingLevel?: 'low' | 'medium' | 'high';
+
+  // Gemini-specific
+  approvalMode?: 'default' | 'auto_edit' | 'yolo' | 'plan';
   
   // Future extensibility - specific config values can be added here
   [key: string]: string | number | boolean | Array<unknown> | undefined;

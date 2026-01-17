@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ChevronDown, Sparkles, Code2, Loader2 } from 'lucide-react';
+import { ChevronDown, Sparkles, Code2, Loader2, Star } from 'lucide-react';
 import type { InputBarProps, CLITool, ImageAttachment, ExecutionMode } from './types';
 import { API } from '../../utils/api';
 import { withTimeout } from '../../utils/withTimeout';
@@ -55,6 +55,7 @@ type AiToolsStatus = {
   cached?: boolean;
   claude: ToolAvailability;
   codex: ToolAvailability;
+  gemini: ToolAvailability;
 };
 
 type ToolDisplaySettings = {
@@ -65,6 +66,7 @@ type ToolDisplaySettings = {
 type AiToolSettingsResponse = {
   claude?: { model?: string };
   codex?: { model?: string; reasoningEffort?: string; sandbox?: string; askForApproval?: string };
+  gemini?: { model?: string };
 };
 
 const formatCliVersion = (version?: string): string | undefined => {
@@ -101,6 +103,7 @@ const CLISelector: React.FC<{
   const tools: { id: CLITool; label: string; icon: React.ReactNode }[] = [
     { id: 'claude', label: 'Claude', icon: <Sparkles className="w-3.5 h-3.5" /> },
     { id: 'codex', label: 'Codex', icon: <Code2 className="w-3.5 h-3.5" /> },
+    { id: 'gemini', label: 'Gemini', icon: <Star className="w-3.5 h-3.5" /> },
   ];
 
   const selectedTool = tools.find(t => t.id === selected) || tools[0];
@@ -212,7 +215,8 @@ export const InputBar: React.FC<InputBarProps> = React.memo(({
   const [, setToolSettingsTimelineLoading] = useState(true);
   const [toolSettings, setToolSettings] = useState<Record<CLITool, ToolDisplaySettings>>({
     claude: {},
-    codex: {}
+    codex: {},
+    gemini: {}
   });
   const [escPending, setEscPending] = useState(false);
   const escTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -597,7 +601,7 @@ export const InputBar: React.FC<InputBarProps> = React.memo(({
 
   const applyTimelineEventToSettings = useCallback((event: TimelineEvent) => {
     if (event.kind !== 'cli.command') return;
-    if (event.tool !== 'claude' && event.tool !== 'codex') return;
+    if (event.tool !== 'claude' && event.tool !== 'codex' && event.tool !== 'gemini') return;
     const meta = (event.meta || {}) as Record<string, unknown>;
     const cliModel = typeof meta.cliModel === 'string' ? meta.cliModel : undefined;
     const cliReasoningEffort = typeof meta.cliReasoningEffort === 'string' ? meta.cliReasoningEffort : undefined;
@@ -609,11 +613,16 @@ export const InputBar: React.FC<InputBarProps> = React.memo(({
           ...next.claude,
           model: cliModel ?? next.claude.model,
         };
-      } else {
+      } else if (event.tool === 'codex') {
         next.codex = {
           ...next.codex,
           model: cliModel ?? next.codex.model,
           level: cliReasoningEffort ?? next.codex.level,
+        };
+      } else {
+        next.gemini = {
+          ...next.gemini,
+          model: cliModel ?? next.gemini.model,
         };
       }
       return next;
@@ -634,6 +643,9 @@ export const InputBar: React.FC<InputBarProps> = React.memo(({
           model: typeof data.codex?.model === 'string' ? data.codex?.model : prev.codex.model,
           level: typeof data.codex?.reasoningEffort === 'string' ? data.codex?.reasoningEffort : prev.codex.level,
         },
+        gemini: {
+          model: typeof data.gemini?.model === 'string' ? data.gemini?.model : prev.gemini.model,
+        },
       }));
     } catch {
     } finally {
@@ -650,13 +662,16 @@ export const InputBar: React.FC<InputBarProps> = React.memo(({
 
       let lastClaude: TimelineEvent | null = null;
       let lastCodex: TimelineEvent | null = null;
+      let lastGemini: TimelineEvent | null = null;
       for (const e of events) {
         if (e.kind !== 'cli.command') continue;
         if (e.tool === 'claude') lastClaude = e;
         if (e.tool === 'codex') lastCodex = e;
+        if (e.tool === 'gemini') lastGemini = e;
       }
       if (lastClaude) applyTimelineEventToSettings(lastClaude);
       if (lastCodex) applyTimelineEventToSettings(lastCodex);
+      if (lastGemini) applyTimelineEventToSettings(lastGemini);
     } catch {
     } finally {
       setToolSettingsTimelineLoading(false);
@@ -683,7 +698,7 @@ export const InputBar: React.FC<InputBarProps> = React.memo(({
     void loadAvailability();
   }, [loadAvailability]);
 
-  const agentName = selectedTool === 'claude' ? 'Claude' : 'Codex';
+  const agentName = selectedTool === 'claude' ? 'Claude' : selectedTool === 'codex' ? 'Codex' : 'Gemini';
   const modeName = executionMode === 'plan' ? 'Plan' : 'Execute';
   const selectedSettings = toolSettings[selectedTool];
   const availabilityForSelected = aiToolsStatus?.[selectedTool];

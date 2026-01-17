@@ -190,7 +190,7 @@ const formatCommandDisplay = (command: string, meta?: Record<string, unknown>) =
 };
 
 const getAgentModelLabelFromCommands = (commands: CommandInfo[]): string | null => {
-  const labelsByAgent = new Map<'Codex' | 'Claude', Set<string>>();
+  const labelsByAgent = new Map<'Codex' | 'Claude' | 'Gemini', Set<string>>();
   for (const c of commands) {
     if (c.kind !== 'cli') continue;
     const rawTool = typeof c.tool === 'string' ? c.tool : '';
@@ -198,7 +198,8 @@ const getAgentModelLabelFromCommands = (commands: CommandInfo[]): string | null 
     const agent =
       tool.includes('codex') ? 'Codex'
         : tool.includes('claude') ? 'Claude'
-          : null;
+          : tool.includes('gemini') ? 'Gemini'
+            : null;
     if (!agent) continue;
 
     const meta = c.meta || {};
@@ -1249,7 +1250,7 @@ export const TimelineView: React.FC<{
                   console.error('Failed to answer question: panelId not found in pending question');
                   return;
                 }
-                const panelType = session.toolType === 'codex' ? 'codex' : 'claude';
+                const panelType = session.toolType === 'codex' ? 'codex' : session.toolType === 'gemini' ? 'gemini' : 'claude';
                 window.electronAPI.panels
                   .answerQuestion(panelId, panelType, answers)
                   .catch((error: unknown) => {

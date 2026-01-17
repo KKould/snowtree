@@ -6,12 +6,14 @@ export interface AIPanelConfig {
     model?: string;
     prompt: string;
     worktreePath: string;
+    planMode?: boolean;
     permissionMode?: 'approve' | 'ignore';
     modelProvider?: string;
     approvalPolicy?: 'auto' | 'manual';
     sandboxMode?: 'read-only' | 'workspace-write' | 'danger-full-access';
     webSearch?: boolean;
     thinkingLevel?: 'low' | 'medium' | 'high';
+    approvalMode?: 'default' | 'auto_edit' | 'yolo' | 'plan';
     [key: string]: string | number | boolean | Array<unknown> | undefined;
 }
 /**

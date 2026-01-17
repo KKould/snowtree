@@ -14,6 +14,9 @@
  * - codex/          - OpenAI Codex executor
  *   - CodexExecutor.ts - Main executor (JSON-RPC)
  *   - CodexMessageParser.ts - Event notification parser
+ * - gemini/         - Gemini CLI executor
+ *   - GeminiExecutor.ts - Main executor (stream-json)
+ *   - GeminiMessageParser.ts - Event parser
  */
 
 // Types
@@ -28,12 +31,16 @@ export { ClaudeExecutor, ClaudeMessageParser } from './claude';
 // Codex executor
 export { CodexExecutor, CodexMessageParser } from './codex';
 
+// Gemini executor
+export { GeminiExecutor, GeminiMessageParser } from './gemini';
+
 // Git executor (Snowtree-run git operations)
 export { GitExecutor } from './git';
 
 // Factory function
 import { ClaudeExecutor } from './claude';
 import { CodexExecutor } from './codex';
+import { GeminiExecutor } from './gemini';
 import type { ExecutorTool } from './types';
 import type { Logger } from '../infrastructure/logging/logger';
 import type { ConfigManager } from '../infrastructure/config/configManager';
@@ -50,6 +57,8 @@ export function createExecutor(
       return new ClaudeExecutor(sessionManager, logger, configManager);
     case 'codex':
       return new CodexExecutor(sessionManager, logger, configManager);
+    case 'gemini':
+      return new GeminiExecutor(sessionManager, logger, configManager);
     default:
       throw new Error(`Unknown executor tool: ${tool}`);
   }

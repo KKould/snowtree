@@ -26,7 +26,7 @@ export interface Session {
   displayOrder?: number;
   isFavorite?: boolean;
   autoCommit?: boolean;
-  toolType: 'claude' | 'codex' | 'none';
+  toolType: 'claude' | 'codex' | 'gemini' | 'none';
   baseCommit?: string;
   baseBranch?: string;
   commitMode?: 'structured' | 'checkpoint' | 'disabled';
@@ -48,7 +48,7 @@ export interface SessionUpdate {
   baseCommit?: string | null;
   baseBranch?: string | null;
   skipContinueNext?: boolean;
-  toolType?: 'claude' | 'codex' | 'none';
+  toolType?: 'claude' | 'codex' | 'gemini' | 'none';
   executionMode?: 'plan' | 'execute';
 }
 

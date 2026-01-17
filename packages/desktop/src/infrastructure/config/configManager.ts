@@ -8,6 +8,7 @@ import { getSnowtreeDirectory } from '../utils/snowtreeDirectory';
 export interface AppConfig {
   claudeExecutablePath?: string;
   codexExecutablePath?: string;
+  geminiExecutablePath?: string;
   anthropicApiKey?: string;
   openaiApiKey?: string;
   verbose?: boolean;

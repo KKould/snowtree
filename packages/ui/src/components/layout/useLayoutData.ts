@@ -88,7 +88,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
   const cycleSelectedTool = useCallback(async () => {
     if (!session) return;
 
-    const tools: CLITool[] = ['claude', 'codex'];
+    const tools: CLITool[] = ['claude', 'codex', 'gemini'];
     const currentIndex = tools.indexOf(selectedTool);
     const nextIndex = (currentIndex + 1) % tools.length;
     const nextTool = tools[nextIndex];
@@ -120,7 +120,13 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
         if (requestId !== requestIdRef.current) return;
         if (response.success && response.data) {
           setSession(response.data);
-          setSelectedTool(response.data.toolType === 'codex' ? 'codex' : 'claude');
+          setSelectedTool(
+            response.data.toolType === 'codex'
+              ? 'codex'
+              : response.data.toolType === 'gemini'
+                ? 'gemini'
+                : 'claude'
+          );
           setExecutionMode(response.data.executionMode === 'plan' ? 'plan' : 'execute');
           setIsProcessing(
             response.data.status === 'running' || response.data.status === 'initializing'
@@ -141,7 +147,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
         if (panelsResponse?.success && panelsResponse.data) {
           const panels: ToolPanel[] = panelsResponse.data;
 
-          const ai = panels.find(p => p.type === 'claude' || p.type === 'codex') || null;
+          const ai = panels.find(p => p.type === 'claude' || p.type === 'codex' || p.type === 'gemini') || null;
           setAiPanel(ai);
           // Note: Do NOT override selectedTool here - it's already set from session.toolType
         }
@@ -216,7 +222,13 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
     const handleSessionCreated = (createdSession: Session) => {
       if (createdSession.id !== sessionId) return;
       setSession(createdSession);
-      setSelectedTool(createdSession.toolType === 'codex' ? 'codex' : 'claude');
+      setSelectedTool(
+        createdSession.toolType === 'codex'
+          ? 'codex'
+          : createdSession.toolType === 'gemini'
+            ? 'gemini'
+            : 'claude'
+      );
       setIsProcessing(
         createdSession.status === 'running' || createdSession.status === 'initializing'
       );
@@ -244,7 +256,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
     };
   }, [sessionId]);
 
-  const ensureAiPanel = useCallback(async (desiredPanelType: 'claude' | 'codex') => {
+  const ensureAiPanel = useCallback(async (desiredPanelType: 'claude' | 'codex' | 'gemini') => {
     if (!session) return null;
 
     let panelToUse = aiPanel;
@@ -274,7 +286,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
       const createResponse = await window.electronAPI.panels.create({
         sessionId: session.id,
         type: desiredPanelType,
-        name: desiredPanelType === 'codex' ? 'Codex' : 'Claude'
+        name: desiredPanelType === 'codex' ? 'Codex' : desiredPanelType === 'gemini' ? 'Gemini' : 'Claude'
       });
 
       if (createResponse?.success && createResponse.data) {
@@ -317,7 +329,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
     setIsProcessing(true);
 
     try {
-      const desiredPanelType = selectedTool === 'codex' ? 'codex' : 'claude';
+      const desiredPanelType = selectedTool === 'codex' ? 'codex' : selectedTool === 'gemini' ? 'gemini' : 'claude';
       const panelToUse = await ensureAiPanel(desiredPanelType);
 
       if (!panelToUse) {
@@ -343,7 +355,7 @@ export function useLayoutData(sessionId: string | null): UseLayoutDataResult {
     setIsProcessing(true);
 
     try {
-      const desiredPanelType = tool === 'codex' ? 'codex' : 'claude';
+      const desiredPanelType = tool === 'codex' ? 'codex' : tool === 'gemini' ? 'gemini' : 'claude';
       const panelToUse = await ensureAiPanel(desiredPanelType);
 
       if (!panelToUse) {

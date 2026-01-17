@@ -124,6 +124,7 @@ export abstract class AbstractExecutor extends EventEmitter {
     const type = this.getToolType();
     if (type === 'claude') return 'Claude';
     if (type === 'codex') return 'Codex';
+    if (type === 'gemini') return 'Gemini';
     return 'CLI';
   }
 

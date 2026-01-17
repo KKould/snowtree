@@ -11,6 +11,7 @@ import type { ExecutionTracker } from '../../features/queue/ExecutionTracker';
 import type { DatabaseService } from '../database/database';
 import type { ClaudeExecutor } from '../../executors/claude';
 import type { CodexExecutor } from '../../executors/codex';
+import type { GeminiExecutor } from '../../executors/gemini';
 import type { GitExecutor } from '../../executors/git';
 import type { Logger } from '../logging/logger';
 import type { UpdateManager } from '../../features/updater/UpdateManager';
@@ -24,6 +25,7 @@ export interface AppServices {
   gitExecutor: GitExecutor;
   claudeExecutor: ClaudeExecutor;
   codexExecutor: CodexExecutor;
+  geminiExecutor: GeminiExecutor;
   gitDiffManager: GitDiffManager;
   gitStatusManager: GitStatusManager;
   gitStagingManager: GitStagingManager;

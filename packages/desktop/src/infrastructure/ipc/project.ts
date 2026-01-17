@@ -9,7 +9,7 @@ type CreateProjectRequest = {
 };
 
 export function registerProjectHandlers(ipcMain: IpcMain, services: AppServices): void {
-  const { databaseService, sessionManager, worktreeManager, claudeExecutor, codexExecutor, gitExecutor, gitStatusManager } = services;
+  const { databaseService, sessionManager, worktreeManager, claudeExecutor, codexExecutor, geminiExecutor, gitExecutor, gitStatusManager } = services;
 
   ipcMain.handle('projects:get-all', async () => {
     try {
@@ -48,6 +48,7 @@ export function registerProjectHandlers(ipcMain: IpcMain, services: AppServices)
           for (const panel of panels) {
             if (panel.type === 'claude') await claudeExecutor.kill(panel.id);
             if (panel.type === 'codex') await codexExecutor.kill(panel.id);
+            if (panel.type === 'gemini') await geminiExecutor.kill(panel.id);
           }
         } catch {
           // ignore
@@ -121,6 +122,7 @@ export function registerProjectHandlers(ipcMain: IpcMain, services: AppServices)
           for (const panel of panels) {
             if (panel.type === 'claude') await claudeExecutor.kill(panel.id);
             if (panel.type === 'codex') await codexExecutor.kill(panel.id);
+            if (panel.type === 'gemini') await geminiExecutor.kill(panel.id);
           }
         } catch {
           // ignore

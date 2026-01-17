@@ -38,7 +38,7 @@ interface CreateSessionJob {
   folderId?: string;
   baseBranch?: string;
   autoCommit?: boolean;
-  toolType?: 'claude' | 'codex' | 'none';
+  toolType?: 'claude' | 'codex' | 'gemini' | 'none';
   commitMode?: 'structured' | 'checkpoint' | 'disabled';
   commitModeSettings?: string; // JSON string of CommitModeSettings
   codexConfig?: {
@@ -53,6 +53,10 @@ interface CreateSessionJob {
     model?: string;
     permissionMode?: 'approve' | 'ignore';
     ultrathink?: boolean;
+  };
+  geminiConfig?: {
+    model?: string;
+    approvalMode?: 'default' | 'auto_edit' | 'yolo' | 'plan';
   };
 }
 
@@ -155,7 +159,7 @@ export class TaskQueue {
     const sessionConcurrency = isLinux ? 1 : 5;
     
     this.sessionQueue.process(sessionConcurrency, async (job) => {
-      const { prompt, worktreeTemplate, index, permissionMode, projectId, baseBranch, autoCommit, toolType, codexConfig, claudeConfig } = job.data;
+      const { prompt, worktreeTemplate, index, permissionMode, projectId, baseBranch, autoCommit, toolType, codexConfig, claudeConfig, geminiConfig } = job.data;
       const { sessionManager, worktreeManager, claudeExecutor } = this.options;
 
       // Processing session creation job - verbose debug logging removed
@@ -319,6 +323,11 @@ export class TaskQueue {
           (session as Session & { claudeConfig?: typeof claudeConfig }).claudeConfig = claudeConfig;
         }
 
+        // Attach geminiConfig to the session object for the panel creation in events.ts
+        if (geminiConfig) {
+          (session as Session & { geminiConfig?: typeof geminiConfig }).geminiConfig = geminiConfig;
+        }
+
         // Only add prompt-related data if there's actually a prompt
         if (prompt && prompt.trim().length > 0) {
           // Add the initial prompt marker
@@ -364,7 +373,7 @@ export class TaskQueue {
 
         // Only start an AI panel if there's a prompt
         if (prompt && prompt.trim().length > 0) {
-          const resolvedToolType: 'claude' | 'codex' | 'none' = toolType || 'claude';
+          const resolvedToolType: 'claude' | 'codex' | 'gemini' | 'none' = toolType || 'claude';
 
           if (resolvedToolType === 'codex') {
             // Update status message
@@ -464,6 +473,51 @@ export class TaskQueue {
               console.error(`[TaskQueue] No Claude panel found for session ${session.id} after ${maxAttempts} attempts`);
               throw new Error('No Claude panel found - cannot start Claude without a real panel ID');
             }
+          } else if (resolvedToolType === 'gemini') {
+            // Update status message
+            sessionManager.updateSessionStatus(session.id, 'initializing', 'Starting Gemini CLI...');
+
+            let geminiPanel = null;
+            let attempts = 0;
+            const maxAttempts = 15;
+
+            while (!geminiPanel && attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 200));
+              const { panelManager } = require('./panelManager');
+              const existingPanels = panelManager.getPanelsForSession(session.id);
+              geminiPanel = existingPanels.find((p: ToolPanel) => p.type === 'gemini');
+              attempts++;
+            }
+
+            if (geminiPanel) {
+              const { geminiPanelManager } = require('../ipc/geminiPanel');
+              if (geminiPanelManager) {
+                try {
+                  try {
+                    sessionManager.addPanelConversationMessage(geminiPanel.id, 'user', prompt);
+                  } catch (e) {
+                    console.warn('[TaskQueue] Failed to add initial panel conversation message:', e);
+                  }
+
+                  await geminiPanelManager.startPanel({
+                    panelId: geminiPanel.id,
+                    worktreePath: session.worktreePath,
+                    prompt,
+                    model: geminiConfig?.model,
+                    approvalMode: geminiConfig?.approvalMode,
+                  });
+                } catch (error) {
+                  console.error('[TaskQueue] Failed to start Gemini via panel manager:', error);
+                  throw new Error(`Failed to start Gemini panel: ${error}`);
+                }
+              } else {
+                console.error('[TaskQueue] GeminiPanelManager not available, cannot start Gemini');
+                throw new Error('Gemini panel manager not available');
+              }
+            } else {
+              console.error(`[TaskQueue] No Gemini panel found for session ${session.id} after ${maxAttempts} attempts`);
+              throw new Error('No Gemini panel found - cannot start Gemini without a real panel ID');
+            }
           } else if (resolvedToolType === 'none') {
             // No AI tool selected - update session status to stopped
             console.log(`[TaskQueue] Session ${session.id} has no AI tool configured, marking as stopped`);
@@ -482,7 +536,7 @@ export class TaskQueue {
           }
         } else {
           // No prompt provided - set status based on toolType
-          const resolvedToolType: 'claude' | 'codex' | 'none' = toolType || 'claude';
+          const resolvedToolType: 'claude' | 'codex' | 'gemini' | 'none' = toolType || 'claude';
           if (resolvedToolType === 'none') {
             console.log(`[TaskQueue] Session ${session.id} has no prompt and no AI tool, marking as stopped`);
             await sessionManager.updateSession(session.id, { status: 'stopped', statusMessage: undefined });
@@ -569,7 +623,7 @@ export class TaskQueue {
     projectId?: number,
     baseBranch?: string,
     autoCommit?: boolean,
-    toolType?: 'claude' | 'codex' | 'none',
+    toolType?: 'claude' | 'codex' | 'gemini' | 'none',
     commitMode?: 'structured' | 'checkpoint' | 'disabled',
     commitModeSettings?: string,
     codexConfig?: {
@@ -584,6 +638,10 @@ export class TaskQueue {
       model?: string;
       permissionMode?: 'approve' | 'ignore';
       ultrathink?: boolean;
+    },
+    geminiConfig?: {
+      model?: string;
+      approvalMode?: 'default' | 'auto_edit' | 'yolo' | 'plan';
     },
     providedFolderId?: string
   ): Promise<(Bull.Job<CreateSessionJob> | { id: string; data: CreateSessionJob; status: string })[]> {
@@ -637,7 +695,7 @@ export class TaskQueue {
     for (let i = 0; i < count; i++) {
       // Use the generated base name if no template was provided
       const templateToUse = worktreeTemplate || generatedBaseName || '';
-      jobs.push(this.sessionQueue.add({ prompt, worktreeTemplate: templateToUse, index: i, permissionMode, projectId, folderId, baseBranch, autoCommit, toolType, commitMode, commitModeSettings, codexConfig, claudeConfig }));
+      jobs.push(this.sessionQueue.add({ prompt, worktreeTemplate: templateToUse, index: i, permissionMode, projectId, folderId, baseBranch, autoCommit, toolType, commitMode, commitModeSettings, codexConfig, claudeConfig, geminiConfig }));
     }
     return Promise.all(jobs);
   }

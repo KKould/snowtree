@@ -6,12 +6,12 @@ export interface ToolPanel {
     state: ToolPanelState;
     metadata: ToolPanelMetadata;
 }
-export type ToolPanelType = 'terminal' | 'claude' | 'codex' | 'diff' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks';
+export type ToolPanelType = 'terminal' | 'claude' | 'codex' | 'gemini' | 'diff' | 'editor' | 'logs' | 'dashboard' | 'setup-tasks';
 export interface ToolPanelState {
     isActive: boolean;
     isPinned?: boolean;
     hasBeenViewed?: boolean;
-    customState?: TerminalPanelState | ClaudePanelState | CodexPanelState | DiffPanelState | EditorPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | Record<string, unknown>;
+    customState?: TerminalPanelState | ClaudePanelState | CodexPanelState | GeminiPanelState | DiffPanelState | EditorPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | Record<string, unknown>;
 }
 export interface TerminalPanelState {
     isInitialized?: boolean;
@@ -47,6 +47,7 @@ export interface DiffPanelState {
     commitSha?: string;
 }
 export type PanelStatus = 'idle' | 'running' | 'waiting' | 'stopped' | 'completed_unviewed' | 'error';
+export type ExecutionMode = 'execute' | 'plan';
 export interface BaseAIPanelState {
     isInitialized?: boolean;
     lastPrompt?: string;
@@ -55,6 +56,7 @@ export interface BaseAIPanelState {
     lastInput?: string;
     panelStatus?: PanelStatus;
     hasUnviewedContent?: boolean;
+    executionMode?: ExecutionMode;
     agentSessionId?: string;
     claudeSessionId?: string;
     codexSessionId?: string;
@@ -78,6 +80,9 @@ export interface CodexPanelState extends BaseAIPanelState {
         sandboxMode: 'read-only' | 'workspace-write' | 'danger-full-access';
         webSearch: boolean;
     };
+}
+export interface GeminiPanelState extends BaseAIPanelState {
+    approvalMode?: 'default' | 'auto_edit' | 'yolo' | 'plan';
 }
 export interface EditorPanelState {
     filePath?: string;
@@ -130,7 +135,7 @@ export interface CreatePanelRequest {
     sessionId: string;
     type: ToolPanelType;
     title?: string;
-    initialState?: TerminalPanelState | ClaudePanelState | CodexPanelState | DiffPanelState | EditorPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | {
+    initialState?: TerminalPanelState | ClaudePanelState | CodexPanelState | GeminiPanelState | DiffPanelState | EditorPanelState | LogsPanelState | DashboardPanelState | SetupTasksPanelState | {
         customState?: unknown;
     };
     metadata?: Partial<ToolPanelMetadata>;

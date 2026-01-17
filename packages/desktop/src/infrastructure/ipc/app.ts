@@ -6,12 +6,12 @@ import type { AppServices } from './types';
 
 export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): void {
   const { app } = services;
-  const { claudeExecutor, codexExecutor } = services;
+  const { claudeExecutor, codexExecutor, geminiExecutor } = services;
 
   let cachedAiToolStatus:
-    | { fetchedAtMs: number; data: { claude: unknown; codex: unknown } }
+    | { fetchedAtMs: number; data: { claude: unknown; codex: unknown; gemini: unknown } }
     | null = null;
-  let inFlightAiToolStatus: Promise<{ claude: unknown; codex: unknown }> | null = null;
+  let inFlightAiToolStatus: Promise<{ claude: unknown; codex: unknown; gemini: unknown }> | null = null;
 
   // Basic app info handlers
   ipcMain.handle('get-app-version', () => {
@@ -119,7 +119,7 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
     }
   });
 
-  // AI tool availability probe (claude/codex)
+  // AI tool availability probe (claude/codex/gemini)
   ipcMain.handle('ai-tools:get-status', async (_event, options?: { force?: boolean }) => {
     const force = options?.force === true;
     const ttlMs = 15_000;
@@ -131,7 +131,7 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
 
     if (!inFlightAiToolStatus) {
       inFlightAiToolStatus = (async () => {
-        const [claude, codex] = await Promise.all([
+        const [claude, codex, gemini] = await Promise.all([
           (async () => {
             if (force) claudeExecutor.clearAvailabilityCache();
             return claudeExecutor.getCachedAvailability();
@@ -139,11 +139,16 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
           (async () => {
             if (force) codexExecutor.clearAvailabilityCache();
             return codexExecutor.getCachedAvailability();
+          })(),
+          (async () => {
+            if (force) geminiExecutor.clearAvailabilityCache();
+            return geminiExecutor.getCachedAvailability();
           })()
         ]);
         return {
           claude: claude ?? { available: false, error: 'Claude executor unavailable' },
-          codex: codex ?? { available: false, error: 'Codex executor unavailable' }
+          codex: codex ?? { available: false, error: 'Codex executor unavailable' },
+          gemini: gemini ?? { available: false, error: 'Gemini executor unavailable' }
         };
       })().finally(() => {
         inFlightAiToolStatus = null;
@@ -213,17 +218,41 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
         }
       }
 
+      const geminiSettingsPath = path.join(home, '.gemini', 'settings.json');
+      let geminiModel: string | undefined;
+      const geminiSettingsExists = fs.existsSync(geminiSettingsPath);
+      if (geminiSettingsExists) {
+        try {
+          const raw = fs.readFileSync(geminiSettingsPath, 'utf8');
+          const parsed = JSON.parse(raw) as { model?: unknown };
+          if (typeof parsed.model === 'string') {
+            geminiModel = parsed.model;
+          } else if (
+            parsed.model &&
+            typeof parsed.model === 'object' &&
+            'name' in parsed.model &&
+            typeof (parsed.model as { name?: unknown }).name === 'string'
+          ) {
+            geminiModel = (parsed.model as { name: string }).name;
+          }
+        } catch {
+          // ignore invalid JSON
+        }
+      }
+
       // Debug-only log for diagnosing detection issues; never include secrets.
       // This will appear in the main process log when the UI opens the CLI selector.
       console.log('[AI Tools] settings probe', {
         home,
         claudeSettingsExists,
         codexConfigExists,
+        geminiSettingsExists,
         claudeModel,
         codexModel,
         codexReasoningEffort,
         codexSandbox,
         codexAskForApproval,
+        geminiModel,
       });
 
       return {
@@ -237,6 +266,9 @@ export function registerAppHandlers(ipcMain: IpcMain, services: AppServices): vo
             reasoningEffort: codexReasoningEffort,
             sandbox: codexSandbox,
             askForApproval: codexAskForApproval,
+          },
+          gemini: {
+            model: geminiModel,
           }
         }
       };

@@ -4,14 +4,19 @@ import type { AppServices } from './types';
 import { panelManager } from '../../features/panels/PanelManager';
 import { ClaudePanelManager } from '../../features/panels/ai/ClaudePanelManager';
 import { CodexPanelManager } from '../../features/panels/ai/CodexPanelManager';
+import { GeminiPanelManager } from '../../features/panels/ai/GeminiPanelManager';
 import type { AIPanelState } from '@snowtree/core/types/aiPanelConfig';
 import { randomUUID } from 'crypto';
 import { persistRendererImageAttachments } from '../utils/imageAttachments';
 
+export let claudePanelManager: ClaudePanelManager | null = null;
+export let codexPanelManager: CodexPanelManager | null = null;
+export let geminiPanelManager: GeminiPanelManager | null = null;
+
 type MinimalCreateSessionRequest = {
   projectId: number;
   prompt?: string;
-  toolType?: 'claude' | 'codex' | 'none';
+  toolType?: 'claude' | 'codex' | 'gemini' | 'none';
   baseBranch?: string;
 };
 
@@ -22,15 +27,13 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
     gitStatusManager,
     claudeExecutor,
     codexExecutor,
+    geminiExecutor,
     logger,
     configManager,
     worktreeManager,
     databaseService,
     gitExecutor
   } = services;
-
-  let claudePanelManager: ClaudePanelManager | null = null;
-  let codexPanelManager: CodexPanelManager | null = null;
 
   const ensureClaudePanelManager = () => {
     if (!claudePanelManager) {
@@ -44,6 +47,13 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
       codexPanelManager = new CodexPanelManager(codexExecutor, sessionManager, logger, configManager);
     }
     return codexPanelManager;
+  };
+
+  const ensureGeminiPanelManager = () => {
+    if (!geminiPanelManager) {
+      geminiPanelManager = new GeminiPanelManager(geminiExecutor, sessionManager, logger, configManager);
+    }
+    return geminiPanelManager;
   };
 
   /**
@@ -143,6 +153,8 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
           await claudeExecutor.kill(panel.id, 'interrupted');
         } else if (panel.type === 'codex') {
           await codexExecutor.kill(panel.id, 'interrupted');
+        } else if (panel.type === 'gemini') {
+          await geminiExecutor.kill(panel.id, 'interrupted');
         }
       }
       return { success: true };
@@ -163,6 +175,8 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
           await claudeExecutor.kill(panel.id);
         } else if (panel.type === 'codex') {
           await codexExecutor.kill(panel.id);
+        } else if (panel.type === 'gemini') {
+          await geminiExecutor.kill(panel.id);
         }
       }
 
@@ -303,6 +317,29 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
         return { success: true };
       }
 
+      if (panel.type === 'gemini') {
+        const manager = ensureGeminiPanelManager();
+        manager.registerPanel(panelId, session.id, panel.state?.customState as AIPanelState | undefined, false);
+        if (typeof persistedAgentSessionId === 'string' && persistedAgentSessionId) {
+          manager.setAgentSessionId(panelId, persistedAgentSessionId);
+        }
+
+        if (geminiExecutor.isRunning(panelId)) {
+          manager.sendInputToPanel(panelId, input, imagePaths);
+        } else {
+          const history = sessionManager.getPanelConversationMessages(panelId);
+          await manager.continuePanel({
+            panelId,
+            worktreePath,
+            prompt: input,
+            conversationHistory: history,
+            planMode,
+            imagePaths,
+          });
+        }
+        return { success: true };
+      }
+
       return { success: false, error: `Unsupported panel type: ${panel.type}` };
     } catch (error) {
       sessionManager.addPanelConversationMessage(panelId, 'assistant', `Error: ${error instanceof Error ? error.message : String(error)}`);
@@ -313,7 +350,7 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
     }
   });
 
-  // Answer user question handlers for Claude and Codex panels
+  // Answer user question handlers for Claude, Codex, and Gemini panels
   ipcMain.handle('claude-panels:answer-question', async (_event, panelId: string, answers: Record<string, string | string[]>) => {
     try {
       logger?.info(`[IPC] claude-panels:answer-question called for panelId: ${panelId}, answers: ${JSON.stringify(answers)}`);
@@ -378,6 +415,40 @@ export function registerSessionHandlers(ipcMain: IpcMain, services: AppServices)
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       logger?.error(`[IPC] codexPanel:answer-question failed: ${err.message}`, err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('geminiPanel:answer-question', async (_event, panelId: string, answers: Record<string, string | string[]>) => {
+    try {
+      logger?.info(`[IPC] geminiPanel:answer-question called for panelId: ${panelId}, answers: ${JSON.stringify(answers)}`);
+
+      // Ensure panel is registered before answering
+      const panel = panelManager.getPanel(panelId);
+      if (!panel) {
+        throw new Error(`Panel ${panelId} not found`);
+      }
+      const session = sessionManager.getSession(panel.sessionId);
+      if (!session) {
+        throw new Error(`Session ${panel.sessionId} not found`);
+      }
+
+      const manager = ensureGeminiPanelManager();
+      // Only register if not already registered (to preserve agentSessionId in memory)
+      if (!manager.getPanelState(panelId)) {
+        manager.registerPanel(panelId, session.id, panel.state?.customState as AIPanelState | undefined, false);
+        // Hydrate agentSessionId from database after registration
+        const agentSessionId = sessionManager.getPanelAgentSessionId(panelId);
+        if (agentSessionId) {
+          manager.setAgentSessionId(panelId, agentSessionId);
+        }
+      }
+
+      await manager.answerQuestion(panelId, answers);
+      return { success: true };
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger?.error(`[IPC] geminiPanel:answer-question failed: ${err.message}`, err);
       return { success: false, error: err.message };
     }
   });

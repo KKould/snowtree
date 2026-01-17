@@ -27,6 +27,7 @@ import { setupEventListeners } from './events';
 import type { AppServices } from './infrastructure/ipc';
 import { ClaudeExecutor } from './executors/claude';
 import { CodexExecutor } from './executors/codex';
+import { GeminiExecutor } from './executors/gemini';
 import { GitExecutor } from './executors/git';
 import { setupConsoleWrapper } from './infrastructure/logging/consoleWrapper';
 import { panelManager } from './features/panels/PanelManager';
@@ -116,6 +117,7 @@ let worktreeManager: WorktreeManager;
 let gitExecutor: GitExecutor;
 let claudeExecutor: ClaudeExecutor;
 let codexExecutor: CodexExecutor;
+let geminiExecutor: GeminiExecutor;
 let gitDiffManager: GitDiffManager;
 let gitStatusManager: GitStatusManager;
 let gitStagingManager: GitStagingManager;
@@ -626,6 +628,7 @@ async function initializeServices() {
   // Initialize executors
   claudeExecutor = new ClaudeExecutor(sessionManager, logger, configManager);
   codexExecutor = new CodexExecutor(sessionManager, logger, configManager);
+  geminiExecutor = new GeminiExecutor(sessionManager, logger, configManager);
 
   gitDiffManager = new GitDiffManager(gitExecutor, logger);
   gitStatusManager = new GitStatusManager(sessionManager, worktreeManager, gitDiffManager, gitExecutor, logger);
@@ -652,6 +655,7 @@ async function initializeServices() {
     gitExecutor,
     claudeExecutor,
     codexExecutor,
+    geminiExecutor,
     gitDiffManager,
     gitStatusManager,
     gitStagingManager,
@@ -840,6 +844,13 @@ app.on('before-quit', async (event) => {
         // best-effort
       }
     }
+    if (geminiExecutor) {
+      try {
+        await geminiExecutor.cleanup();
+      } catch {
+        // best-effort
+      }
+    }
     if (taskQueue) {
       try {
         await taskQueue.close();
@@ -884,6 +895,11 @@ app.on('before-quit', async (event) => {
     console.log('[Main] Shutting down Codex executor...');
     await codexExecutor.cleanup();
     console.log('[Main] Codex executor shutdown complete');
+  }
+  if (geminiExecutor) {
+    console.log('[Main] Shutting down Gemini executor...');
+    await geminiExecutor.cleanup();
+    console.log('[Main] Gemini executor shutdown complete');
   }
 
   // Close task queue

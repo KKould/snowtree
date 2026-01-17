@@ -10,7 +10,7 @@ import type { ChildProcessWithoutNullStreams } from 'child_process';
 // Executor Types
 // ============================================================================
 
-export type ExecutorTool = 'claude' | 'codex';
+export type ExecutorTool = 'claude' | 'codex' | 'gemini';
 
 export interface ExecutorSpawnOptions {
   panelId: string;
@@ -30,6 +30,7 @@ export interface ExecutorSpawnOptions {
   sandbox?: string;
   askForApproval?: string;
   reasoningEffort?: string;
+  approvalMode?: string;
   // Plan mode: only plan, don't execute code modifications
   planMode?: boolean;
 }

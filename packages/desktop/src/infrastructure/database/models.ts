@@ -27,7 +27,7 @@ export interface Session {
   display_order?: number | null;
   is_favorite?: boolean | null;
   auto_commit?: boolean | null;
-  tool_type?: 'claude' | 'codex' | 'none' | null;
+  tool_type?: 'claude' | 'codex' | 'gemini' | 'none' | null;
   base_commit?: string | null;
   base_branch?: string | null;
   commit_mode?: 'structured' | 'checkpoint' | 'disabled' | null;
@@ -98,7 +98,7 @@ export interface CreateSessionData {
   is_main_repo?: boolean;
   display_order?: number;
   auto_commit?: boolean;
-  tool_type?: 'claude' | 'codex' | 'none';
+  tool_type?: 'claude' | 'codex' | 'gemini' | 'none';
   base_commit?: string;
   base_branch?: string;
   commit_mode?: 'structured' | 'checkpoint' | 'disabled';
@@ -117,7 +117,7 @@ export interface UpdateSessionData {
   run_started_at?: string;
   is_favorite?: boolean;
   auto_commit?: boolean;
-  tool_type?: 'claude' | 'codex' | 'none';
+  tool_type?: 'claude' | 'codex' | 'gemini' | 'none';
   commit_mode?: 'structured' | 'checkpoint' | 'disabled';
   commit_mode_settings?: string; // JSON string of CommitModeSettings
   skip_continue_next?: boolean;

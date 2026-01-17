@@ -24,7 +24,7 @@ export interface Session {
     displayOrder?: number;
     isFavorite?: boolean;
     autoCommit?: boolean;
-    toolType: 'claude' | 'codex' | 'none';
+    toolType: 'claude' | 'codex' | 'gemini' | 'none';
     baseCommit?: string;
     baseBranch?: string;
     commitMode?: 'structured' | 'checkpoint' | 'disabled';
@@ -32,8 +32,10 @@ export interface Session {
     skipContinueNext?: boolean;
     archived?: boolean;
     claudeSessionId?: string;
+    executionMode?: 'plan' | 'execute';
 }
 export interface SessionUpdate {
+    name?: string;
     status?: Session['status'];
     statusMessage?: string;
     pid?: number;
@@ -43,6 +45,8 @@ export interface SessionUpdate {
     baseCommit?: string | null;
     baseBranch?: string | null;
     skipContinueNext?: boolean;
+    toolType?: 'claude' | 'codex' | 'gemini' | 'none';
+    executionMode?: 'plan' | 'execute';
 }
 export interface GitStatus {
     branch?: string;

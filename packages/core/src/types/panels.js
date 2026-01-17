@@ -27,6 +27,14 @@ exports.PANEL_CAPABILITIES = {
         canAppearInProjects: true, // Codex can appear in projects
         canAppearInWorktrees: true // Codex can appear in worktrees
     },
+    gemini: {
+        canEmit: ['files:changed'], // Gemini can change files through tool calls
+        canConsume: [], // Gemini doesn't consume events in initial implementation
+        requiresProcess: true,
+        singleton: false,
+        canAppearInProjects: true, // Gemini can appear in projects
+        canAppearInWorktrees: true // Gemini can appear in worktrees
+    },
     diff: {
         canEmit: ['diff:refreshed'],
         canConsume: ['files:changed', 'terminal:command_executed'],
